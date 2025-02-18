@@ -40,7 +40,7 @@ class RobotBase(object):
         self.__init_robot__()
         self.__parse_joint_info__()
         self.__post_load__()
-        print(self.joints)
+        pass
 
     def step_simulation(self):
         raise RuntimeError('`step_simulation` method of RobotBase Class should be hooked by the environment.')
@@ -107,9 +107,19 @@ class RobotBase(object):
     def close_gripper(self):
         self.move_gripper(self.gripper_range[0])
 
+    def get_ee_pos(self):
+        position, orientation = p.getLinkState(self.id, self.eef_id, computeForwardKinematics=True)[4: 6]
+        return position, orientation
+
     def move_ee(self, action, control_method):
-        assert control_method in ('joint', 'end')
-        if control_method == 'end':
+        assert control_method in ('joint', 'end', 'q_end')
+        if control_method == 'q_end':
+            pos, orn = self.get_ee_pos()
+            new_pos = (pos[0], pos[1], pos[2] - 0.1)
+            joint_poses = p.calculateInverseKinematics(self.id, self.eef_id, new_pos, orn,
+                                                       self.arm_lower_limits, self.arm_upper_limits, self.arm_joint_ranges, self.arm_rest_poses,
+                                                       maxNumIterations=20)
+        elif control_method == 'end':
             x, y, z, roll, pitch, yaw = action
             pos = (x, y, z)
             orn = p.getQuaternionFromEuler((roll, pitch, yaw))
@@ -136,6 +146,13 @@ class RobotBase(object):
             velocities.append(vel)
         ee_pos = p.getLinkState(self.id, self.eef_id)[0]
         return dict(positions=positions, velocities=velocities, ee_pos=ee_pos)
+        
+    def end_effector_index(self):
+        """获取机器人末端执行器的链接ID
+        Returns:
+            int: 末端执行器的链接ID
+        """
+        return self.eef_id
 
 
 class Panda(RobotBase):
