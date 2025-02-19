@@ -80,7 +80,7 @@ class Camera:
         self.aspect = self.width / self.height
         
         # 相机相对于末端执行器的偏移
-        self.relative_pos = (0.0, 0.0, 0.05)  # 相对位置：空间略有偏移，防止完全重合
+        self.relative_pos = (0.0, 0.0, 0.10)  # 相对位置：空间略有偏移，防止完全重合
         self.relative_orn = p.getQuaternionFromEuler((0, 0, 0))  # 相对方向：与夹爪保持一致
         
         self.robot_id = robot_id

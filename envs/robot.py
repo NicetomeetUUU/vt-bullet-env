@@ -1,5 +1,6 @@
 import pybullet as p
 import math
+import numpy as np
 from collections import namedtuple
 
 
@@ -115,7 +116,7 @@ class RobotBase(object):
         assert control_method in ('joint', 'end', 'q_end')
         if control_method == 'q_end':
             pos, orn = self.get_ee_pos()
-            new_pos = (pos[0], pos[1], pos[2] - 0.1)
+            new_pos = (pos[0], pos[1], pos[2] - 0.03)
             joint_poses = p.calculateInverseKinematics(self.id, self.eef_id, new_pos, orn,
                                                        self.arm_lower_limits, self.arm_upper_limits, self.arm_joint_ranges, self.arm_rest_poses,
                                                        maxNumIterations=20)
@@ -231,8 +232,8 @@ class UR5Robotiq140(UR5Robotiq85):
                                -1.5707970583733368, 0.0009377758247187636]
         self.id = p.loadURDF('./urdf/ur5_robotiq_140.urdf', self.base_pos, self.base_ori,
                              useFixedBase=True, flags=p.URDF_ENABLE_CACHED_GRAPHICS_SHAPES)
-        self.gripper_range = [0, 0.085]
-        # TODO: It's weird to use the same range and the same formula to calculate open_angle as Robotiq85.
+        # Robotiq 140 有更大的开合范围
+        self.gripper_range = [0, 0.140]  # 0-140mm
 
     def __post_load__(self):
         mimic_parent_name = 'finger_joint'
@@ -242,3 +243,26 @@ class UR5Robotiq140(UR5Robotiq85):
                                 'left_inner_finger_joint': 1,
                                 'right_inner_finger_joint': 1}
         self.__setup_mimic_joints__(mimic_parent_name, mimic_children_names)
+        
+    def move_gripper(self, open_length):
+        """控制 Robotiq 140 夹爪的开合
+        Args:
+            open_length: 夹爪开合距离，单位为米，范围[0, 0.140]
+        """
+        # 限制开合范围
+        open_length = np.clip(open_length, *self.gripper_range)
+        
+        # Robotiq 140 的运动学参数
+        L1 = 0.140  # 指节长度
+        L2 = 0.160  # 指节到夹爪尖端的距离
+        
+        # 计算夹爪角度
+        # 当夹爪完全闭合时，角度为 0.8 弧度
+        # 当夹爪完全打开时，角度为 0 弧度
+        open_angle = 0.8 * (1 - open_length / self.gripper_range[1])
+        
+        # 控制夹爪运动
+        p.setJointMotorControl2(self.id, self.mimic_parent_id, p.POSITION_CONTROL, 
+                                targetPosition=open_angle,
+                                force=self.joints[self.mimic_parent_id].maxForce, 
+                                maxVelocity=self.joints[self.mimic_parent_id].maxVelocity)
