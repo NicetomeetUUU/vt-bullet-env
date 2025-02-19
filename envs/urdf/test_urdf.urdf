@@ -1,0 +1,40 @@
+<?xml version="1.0" ?>
+<robot name="digit_robotiq_ad">
+  <link name="digit_adapter">
+    <visual>
+      <geometry>
+        <mesh filename="../meshes/digit/DIGIT-Robotiq Adapter-2F85-V1.STL" scale="0.001 0.001 0.001"/>
+      </geometry>
+      <material name="white">
+        <color rgba="1 1 1 1"/>
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="../meshes/digit/DIGIT-Robotiq Adapter-2F85-V1.STL" scale="0.001 0.001 0.001"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="digit_adapter_joint" type="fixed">
+    <parent link="digit_adapter"/>
+    <child link="digit_sensor"/>
+    <origin rpy="0 0 0" xyz="0 0 0"/>
+  </joint>
+
+  <link name="digit_sensor">
+    <visual>
+      <geometry>
+        <mesh filename="../meshes/digit/digit.stl" scale="1 1 1"/>
+      </geometry>
+      <material name="white">
+        <color rgba="1 1 1 1"/>
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="../meshes/digit/digit.stl" scale="1 1 1"/>
+      </geometry>
+    </collision>
+  </link>
+</robot>

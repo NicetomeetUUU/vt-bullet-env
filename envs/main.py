@@ -67,9 +67,10 @@ def user_control_demo():
         # 获取并显示相机数据
         rgb, depth, seg = camera.shot()
         # display_camera_data(rgb, depth, seg)
-        
+        robot.reset()
+        robot.move_gripper(0.140)
         input('Press Enter to continue...')
-        robot.move_ee(current_pos, 'q_end')
+        # robot.move_ee(current_pos, 'q_end')
         # 执行多步模拟以确保运动完成
         for _ in range(50):
             env.step_simulation()
