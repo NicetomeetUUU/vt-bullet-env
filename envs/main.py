@@ -2,6 +2,7 @@ import os
 
 import numpy as np
 import pybullet as p
+import tacto    
 
 from tqdm import tqdm
 from env import ClutteredPushGrasp
@@ -52,6 +53,10 @@ def user_control_demo():
         far=5.0,
         fov=60
     )
+
+    # 设置触觉传感器
+    digits = tacto.Sensor(width=120, height=160, visualize_gui=True)
+    digits.add_camera(robot.id, robot.digit_links)
     env.camera = camera  # 更新环境中的相机
     env.reset()
     # env.SIMULATION_STEP_DELAY = 0
@@ -66,23 +71,32 @@ def user_control_demo():
         print(current_pos)
         # 获取并显示相机数据
         rgb, depth, seg = camera.shot()
+        print("Depth data type:", type(depth))
+        print("Depth data shape:", depth.shape)
+        print("Depth data sample:", depth)
+        color, depth = digits.render()
+        digits.updateGUI(color, depth)
         # display_camera_data(rgb, depth, seg)
         robot.reset()
         robot.move_gripper(0.140)
         input('Press Enter to continue...')
         # robot.move_ee(current_pos, 'q_end')
         # 执行多步模拟以确保运动完成
-        for _ in range(50):
+        for _ in range(100):
             env.step_simulation()
             # 更新相机视图
             rgb, depth, seg = camera.shot()
+            color, depth = digits.render()
+            digits.updateGUI(color, depth)
             # display_camera_data(rgb, depth, seg)
         input('Press Enter to continue...')
-        robot.move_gripper(0.140)
-        for _ in range(50):
+        robot.move_gripper(0)
+        for _ in range(100):
             env.step_simulation()
             # 更新相机视图
             rgb, depth, seg = camera.shot()
+            color, depth = digits.render()
+            digits.updateGUI(color, depth)
             # display_camera_data(rgb, depth, seg)
         # print(obs, reward, done, info)
         cnt += 1

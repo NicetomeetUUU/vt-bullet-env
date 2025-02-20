@@ -62,7 +62,7 @@ class YCBModels(Models):
 
 class Camera:
     def __init__(self, robot_id=None, ee_id=None, size=(1280, 720), near=0.105, far=10.0, fov=69.4,
-                 enable_noise=True, enable_distortion=True):
+                 enable_noise=False, enable_distortion=False):
         """Initialize camera with RealSense D435 parameters
         Args:
             robot_id: Robot ID if attached to a robot

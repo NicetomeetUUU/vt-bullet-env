@@ -1,14 +1,16 @@
 import pybullet as p
 import math
 import numpy as np
+import functools
+import pybulletX as px
 from collections import namedtuple
-
 
 class RobotBase(object):
     """
     The base class for robots
     """
 
+    digit_joint_names = ["left_digit_adapter_joint", "right_digit_adapter_joint"]
     def __init__(self, pos, ori):
         """
         Arguments:
@@ -230,10 +232,15 @@ class UR5Robotiq140(UR5Robotiq85):
         self.arm_num_dofs = 6
         self.arm_rest_poses = [-1.5690622952052096, -1.5446774605904932, 1.343946009733127, -1.3708613585093699,
                                -1.5707970583733368, 0.0009377758247187636]
-        self.id = p.loadURDF('./urdf/ur5_robotiq_140.urdf', self.base_pos, self.base_ori,
+        self._id = p.loadURDF('./urdf/ur5_robotiq_140.urdf', self.base_pos, self.base_ori,
                              useFixedBase=True, flags=p.URDF_ENABLE_CACHED_GRAPHICS_SHAPES)
         # Robotiq 140 有更大的开合范围
         self.gripper_range = [0, 0.140]  # 0-140mm
+        # if physics_client is None:
+        #     physics_client = px.current_client()
+        # self._physics_client = physics_client
+        physics_client = px.current_client()
+        self._physics_client = physics_client
 
     def __post_load__(self):
         mimic_parent_name = 'finger_joint'
@@ -262,7 +269,45 @@ class UR5Robotiq140(UR5Robotiq85):
         open_angle = 0.8 * (1 - open_length / self.gripper_range[1])
         
         # 控制夹爪运动
-        p.setJointMotorControl2(self.id, self.mimic_parent_id, p.POSITION_CONTROL, 
+        p.setJointMotorControl2(self._id, self.mimic_parent_id, p.POSITION_CONTROL, 
                                 targetPosition=open_angle,
                                 force=self.joints[self.mimic_parent_id].maxForce, 
                                 maxVelocity=self.joints[self.mimic_parent_id].maxVelocity)
+
+    @property
+    def id(self):
+        return self._id
+    
+    @property
+    def physics_client(self):
+        return self._physics_client
+
+    @property
+    def _client_kwargs(self):
+        return {"physicsClientId": self.physics_client.id}
+
+    @property
+    def num_joints(self):
+        return p.getNumJoints(self.id, **self._client_kwargs)
+
+    def get_joint_infos(self, joint_indices):
+        """
+        Get the joint informations and return JointInfo, which is a structure of arrays (SoA).
+        """
+        return p.getJointInfos(self.id, joint_indices, **self._client_kwargs)
+
+    @property
+    @functools.lru_cache(maxsize=None)
+    def _joint_name_to_index(self):
+        return {
+            j.joint_name.decode(): j.joint_index
+            for j in self.get_joint_infos(range(self.num_joints))
+        }
+
+    def get_joint_index_by_name(self, joint_name):
+        return self._joint_name_to_index[joint_name]
+
+    @property
+    def digit_links(self):
+        return [self.get_joint_index_by_name(name) for name in self.digit_joint_names]
+    
