@@ -9,7 +9,6 @@ class RobotBase(object):
     """
     The base class for robots
     """
-
     digit_joint_names = ["left_digit_adapter_joint", "right_digit_adapter_joint"]
     def __init__(self, pos, ori):
         """
@@ -38,6 +37,13 @@ class RobotBase(object):
         """
         self.base_pos = pos
         self.base_ori = p.getQuaternionFromEuler(ori)
+        
+        # 初始化必要的属性
+        self._id = None  # 机器人ID
+        self.eef_id = None  # 末端执行器ID
+        self.arm_num_dofs = None  # 机械臂自由度
+        self.gripper_range = [0, 0.085]  # 默认夹爱器范围
+        self._physics_client = None  # 物理引擎客户端
 
     def load(self):
         self.__init_robot__()
@@ -49,13 +55,13 @@ class RobotBase(object):
         raise RuntimeError('`step_simulation` method of RobotBase Class should be hooked by the environment.')
 
     def __parse_joint_info__(self):
-        numJoints = p.getNumJoints(self.id)
+        numJoints = p.getNumJoints(self._id)
         jointInfo = namedtuple('jointInfo', 
             ['id','name','type','damping','friction','lowerLimit','upperLimit','maxForce','maxVelocity','controllable'])
         self.joints = []
         self.controllable_joints = []
         for i in range(numJoints):
-            info = p.getJointInfo(self.id, i)
+            info = p.getJointInfo(self._id, i)
             jointID = info[0]
             jointName = info[1].decode("utf-8")
             jointType = info[2]  # JOINT_REVOLUTE, JOINT_PRISMATIC, JOINT_SPHERICAL, JOINT_PLANAR, JOINT_FIXED
@@ -68,7 +74,7 @@ class RobotBase(object):
             controllable = (jointType != p.JOINT_FIXED)
             if controllable:
                 self.controllable_joints.append(jointID)
-                p.setJointMotorControl2(self.id, jointID, p.VELOCITY_CONTROL, targetVelocity=0, force=0)
+                p.setJointMotorControl2(self._id, jointID, p.VELOCITY_CONTROL, targetVelocity=0, force=0)
             info = jointInfo(jointID,jointName,jointType,jointDamping,jointFriction,jointLowerLimit,
                             jointUpperLimit,jointMaxForce,jointMaxVelocity,controllable)
             self.joints.append(info)
@@ -95,7 +101,7 @@ class RobotBase(object):
         reset to rest poses
         """
         for rest_pose, joint_id in zip(self.arm_rest_poses, self.arm_controllable_joints):
-            p.resetJointState(self.id, joint_id, rest_pose)
+            p.resetJointState(self._id, joint_id, rest_pose)
 
         # Wait for a few steps
         for _ in range(10):
@@ -111,7 +117,14 @@ class RobotBase(object):
         self.move_gripper(self.gripper_range[0])
 
     def get_ee_pos(self):
-        position, orientation = p.getLinkState(self.id, self.eef_id, computeForwardKinematics=True)[4: 6]
+        """
+        获取机器人末端执行器的位姿
+        Returns:
+            tuple: (position, orientation)
+                - position: 位置向量 (x, y, z)
+                - orientation: 姿态四元数 (x, y, z, w)
+        """
+        position, orientation = p.getLinkState(self._id, self.eef_id, computeForwardKinematics=True)[4: 6]
         return position, orientation
 
     def move_ee(self, action, control_method):
@@ -119,14 +132,14 @@ class RobotBase(object):
         if control_method == 'q_end':
             pos, orn = self.get_ee_pos()
             new_pos = (pos[0], pos[1], pos[2] - 0.03)
-            joint_poses = p.calculateInverseKinematics(self.id, self.eef_id, new_pos, orn,
+            joint_poses = p.calculateInverseKinematics(self._id, self.eef_id, new_pos, orn,
                                                        self.arm_lower_limits, self.arm_upper_limits, self.arm_joint_ranges, self.arm_rest_poses,
                                                        maxNumIterations=20)
         elif control_method == 'end':
             x, y, z, roll, pitch, yaw = action
             pos = (x, y, z)
             orn = p.getQuaternionFromEuler((roll, pitch, yaw))
-            joint_poses = p.calculateInverseKinematics(self.id, self.eef_id, pos, orn,
+            joint_poses = p.calculateInverseKinematics(self._id, self.eef_id, pos, orn,
                                                        self.arm_lower_limits, self.arm_upper_limits, self.arm_joint_ranges, self.arm_rest_poses,
                                                        maxNumIterations=20)
         elif control_method == 'joint':
@@ -134,20 +147,17 @@ class RobotBase(object):
             joint_poses = action
         # arm
         for i, joint_id in enumerate(self.arm_controllable_joints):
-            p.setJointMotorControl2(self.id, joint_id, p.POSITION_CONTROL, joint_poses[i],
+            p.setJointMotorControl2(self._id, joint_id, p.POSITION_CONTROL, joint_poses[i],
                                     force=self.joints[joint_id].maxForce, maxVelocity=self.joints[joint_id].maxVelocity)
-
-    def move_gripper(self, open_length):
-        raise NotImplementedError
 
     def get_joint_obs(self):
         positions = []
         velocities = []
         for joint_id in self.controllable_joints:
-            pos, vel, _, _ = p.getJointState(self.id, joint_id)
+            pos, vel, _, _ = p.getJointState(self._id, joint_id)
             positions.append(pos)
             velocities.append(vel)
-        ee_pos = p.getLinkState(self.id, self.eef_id)[0]
+        ee_pos = p.getLinkState(self._id, self.eef_id)[0]
         return dict(positions=positions, velocities=velocities, ee_pos=ee_pos)
         
     def end_effector_index(self):
@@ -156,43 +166,28 @@ class RobotBase(object):
             int: 末端执行器的链接ID
         """
         return self.eef_id
+    
+    def move_pose(self, pos, orn):
+        raise NotImplementedError
 
-
-class Panda(RobotBase):
-    def __init_robot__(self):
-        # define the robot
-        # see https://github.com/bulletphysics/bullet3/blob/master/examples/pybullet/gym/pybullet_robots/panda/panda_sim_grasp.py
-        self.eef_id = 11
-        self.arm_num_dofs = 7
-        self.arm_rest_poses = [0.98, 0.458, 0.31, -2.24, -0.30, 2.66, 2.32]
-        self.id = p.loadURDF('./urdf/panda.urdf', self.base_pos, self.base_ori,
-                             useFixedBase=True, flags=p.URDF_ENABLE_CACHED_GRAPHICS_SHAPES)
-        self.gripper_range = [0, 0.04]
-        # create a constraint to keep the fingers centered
-        c = p.createConstraint(self.id,
-                               9,
-                               self.id,
-                               10,
-                               jointType=p.JOINT_GEAR,
-                               jointAxis=[1, 0, 0],
-                               parentFramePosition=[0, 0, 0],
-                               childFramePosition=[0, 0, 0])
-        p.changeConstraint(c, gearRatio=-1, erp=0.1, maxForce=50)
+    def move_joints(self, joints):
+        raise NotImplementedError
 
     def move_gripper(self, open_length):
-        assert self.gripper_range[0] <= open_length <= self.gripper_range[1]
-        for i in [9, 10]:
-            p.setJointMotorControl2(self.id, i, p.POSITION_CONTROL, open_length, force=20)
-
+        raise NotImplementedError
 
 class UR5Robotiq85(RobotBase):
+    def __init__(self, pos, ori):
+        super().__init__(pos, ori)
+        
     def __init_robot__(self):
         self.eef_id = 7
         self.arm_num_dofs = 6
         self.arm_rest_poses = [-1.5690622952052096, -1.5446774605904932, 1.343946009733127, -1.3708613585093699,
                                -1.5707970583733368, 0.0009377758247187636]
-        self.id = p.loadURDF('./urdf/ur5_robotiq_85.urdf', self.base_pos, self.base_ori,
+        self._id = p.loadURDF('./urdf/ur5_robotiq_85.urdf', self.base_pos, self.base_ori,
                              useFixedBase=True, flags=p.URDF_ENABLE_CACHED_GRAPHICS_SHAPES)
+        self._physics_client = px.current_client()
         self.gripper_range = [0, 0.085]
     
     def __post_load__(self):
@@ -210,8 +205,8 @@ class UR5Robotiq85(RobotBase):
         self.mimic_child_multiplier = {joint.id: mimic_children_names[joint.name] for joint in self.joints if joint.name in mimic_children_names}
 
         for joint_id, multiplier in self.mimic_child_multiplier.items():
-            c = p.createConstraint(self.id, self.mimic_parent_id,
-                                   self.id, joint_id,
+            c = p.createConstraint(self._id, self.mimic_parent_id,
+                                   self._id, joint_id,
                                    jointType=p.JOINT_GEAR,
                                    jointAxis=[0, 1, 0],
                                    parentFramePosition=[0, 0, 0],
@@ -222,11 +217,14 @@ class UR5Robotiq85(RobotBase):
         # open_length = np.clip(open_length, *self.gripper_range)
         open_angle = 0.715 - math.asin((open_length - 0.010) / 0.1143)  # angle calculation
         # Control the mimic gripper joint(s)
-        p.setJointMotorControl2(self.id, self.mimic_parent_id, p.POSITION_CONTROL, targetPosition=open_angle,
+        p.setJointMotorControl2(self._id, self.mimic_parent_id, p.POSITION_CONTROL, targetPosition=open_angle,
                                 force=self.joints[self.mimic_parent_id].maxForce, maxVelocity=self.joints[self.mimic_parent_id].maxVelocity)
 
 
 class UR5Robotiq140(UR5Robotiq85):
+    def __init__(self, pos, ori):
+        super().__init__(pos, ori)
+        
     def __init_robot__(self):
         self.eef_id = 7
         self.arm_num_dofs = 6
@@ -251,12 +249,26 @@ class UR5Robotiq140(UR5Robotiq85):
                                 'right_inner_finger_joint': 1}
         self.__setup_mimic_joints__(mimic_parent_name, mimic_children_names)
         
+    def move_joints(self, joints_poses):
+        assert len(joints_poses) == self.arm_num_dofs
+        # arm
+        for i, joint_id in enumerate(self.arm_controllable_joints):
+            p.setJointMotorControl2(self._id, joint_id, p.POSITION_CONTROL, joint_poses[i],
+                                    force=self.joints[joint_id].maxForce, maxVelocity=self.joints[joint_id].maxVelocity)
+    
+    def move_pose(self, pos, orn):
+        joint_poses = p.calculateInverseKinematics(self.id, self.eef_id, pos, orn,
+                                                    self.arm_lower_limits, self.arm_upper_limits, self.arm_joint_ranges, self.arm_rest_poses,
+                                                    maxNumIterations=20)
+        for i, joint_id in enumerate(self.arm_controllable_joints):
+            p.setJointMotorControl2(self._id, joint_id, p.POSITION_CONTROL, joint_poses[i],
+                                    force=self.joints[joint_id].maxForce, maxVelocity=self.joints[joint_id].maxVelocity)
+
     def move_gripper(self, open_length):
         """控制 Robotiq 140 夹爪的开合
         Args:
             open_length: 夹爪开合距离，单位为米，范围[0, 0.140]
         """
-        # 限制开合范围
         open_length = np.clip(open_length, *self.gripper_range)
         
         # Robotiq 140 的运动学参数
@@ -274,6 +286,9 @@ class UR5Robotiq140(UR5Robotiq85):
                                 force=self.joints[self.mimic_parent_id].maxForce, 
                                 maxVelocity=self.joints[self.mimic_parent_id].maxVelocity)
 
+    """
+    以下为导入digit传感器默认需要的属性
+    """
     @property
     def id(self):
         return self._id

@@ -1,117 +1,111 @@
 import time
-import math
-import random
 
 import numpy as np
 import pybullet as p
 import pybullet_data
 
-from utilities import Models, Camera
+from utilities import ModelLoader, Camera
 from collections import namedtuple
-from attrdict import AttrDict
 from tqdm import tqdm
 
-
-class FailToReachTargetError(RuntimeError):
-    pass
-
-
-class ClutteredPushGrasp:
+class VTGraspRefine:
 
     SIMULATION_STEP_DELAY = 1 / 240.
-
-    def __init__(self, robot, models: Models, camera=None, vis=False) -> None:
+    def __init__(self, robot, models: ModelLoader = None, camera=None, vis=False) -> None:
+        """
+        初始化VTGraspRefine环境
+        Args:
+            robot: 机器人对象
+            models: 可选，模型加载器
+            camera: 可选，相机对象
+            vis: 是否显示可视化界面
+        """
         self.robot = robot
+        self.camera = camera
         self.vis = vis
         if self.vis:
             self.p_bar = tqdm(ncols=0, disable=False)
-        self.camera = camera
-
-        # define environment
+        
+        # 环境定义
         self.physicsClient = p.connect(p.GUI if self.vis else p.DIRECT)
         p.setAdditionalSearchPath(pybullet_data.getDataPath())
-        p.setGravity(0, 0, -10)
+        p.setGravity(0, 0, -9.8)
         self.planeID = p.loadURDF("plane.urdf")
-
         self.robot.load()
         self.robot.step_simulation = self.step_simulation
-
-        # custom sliders to tune parameters (name of the parameter,range,initial value)
-        self.xin = p.addUserDebugParameter("x", -0.224, 0.224, 0)
-        self.yin = p.addUserDebugParameter("y", -0.224, 0.224, 0)
-        self.zin = p.addUserDebugParameter("z", 0, 1., 0.5)
-        self.rollId = p.addUserDebugParameter("roll", -3.14, 3.14, 0)
-        self.pitchId = p.addUserDebugParameter("pitch", -3.14, 3.14, np.pi/2)
-        self.yawId = p.addUserDebugParameter("yaw", -np.pi/2, np.pi/2, np.pi/2)
-        self.gripper_opening_length_control = p.addUserDebugParameter("gripper_opening_length", 0, 0.085, 0.04)
-
-        self.boxID = p.loadURDF("./urdf/skew-box-button.urdf",
-                                [0.0, 0.0, 0.0],
-                                # p.getQuaternionFromEuler([0, 1.5706453, 0]),
-                                p.getQuaternionFromEuler([0, 0, 0]),
-                                useFixedBase=True,
-                                flags=p.URDF_MERGE_FIXED_LINKS | p.URDF_USE_SELF_COLLISION)
-
-        # For calculating the reward
-        self.box_opened = False
-        self.btn_pressed = False
-        self.box_closed = False
+        # self.objectid = p.loadURDF("./urdf/skew-box-button.urdf"
 
     def step_simulation(self):
         """
-        Hook p.stepSimulation()
+        以自定义的步长进行仿真
         """
         p.stepSimulation()
         if self.vis:
             time.sleep(self.SIMULATION_STEP_DELAY)
             self.p_bar.update(1)
 
-    def read_debug_parameter(self):
-        # read the value of task parameter
-        x = p.readUserDebugParameter(self.xin)
-        y = p.readUserDebugParameter(self.yin)
-        z = p.readUserDebugParameter(self.zin)
-        roll = p.readUserDebugParameter(self.rollId)
-        pitch = p.readUserDebugParameter(self.pitchId)
-        yaw = p.readUserDebugParameter(self.yawId)
-        gripper_opening_length = p.readUserDebugParameter(self.gripper_opening_length_control)
-
-        return x, y, z, roll, pitch, yaw, gripper_opening_length
-
-    def step(self, action, control_method='joint'):
+    def step_actions(self, actions, steps):
         """
-        action: (x, y, z, roll, pitch, yaw, gripper_opening_length) for End Effector Position Control
-                (a1, a2, a3, a4, a5, a6, a7, gripper_opening_length) for Joint Position Control
-        control_method:  'end' for end effector position control
-                         'joint' for joint position control
+        执行当前动作并进行仿真
+        Args:
+            actions: 单个动作或动作列表，可以是JointAction或PoseAction
         """
-        assert control_method in ('joint', 'end')
-        self.robot.move_ee(action[:-1], control_method)
-        self.robot.move_gripper(action[-1])
-        for _ in range(120):  # Wait for a few steps
-            self.step_simulation()
+        from actions import ActionWrapper
+        
+        # 创建动作执行器
+        action_wrapper = ActionWrapper(self.robot)
+        
+        # 处理单个动作或动作列表
+        if not isinstance(actions, (list, tuple)):
+            actions = [actions]
+            
+        # 执行每个动作
+        for action in actions:
+            action_wrapper.execute_action(action)
+            p.stepSimulation()
+            if self.vis:
+                for _ in range(steps):  
+                    time.sleep(self.SIMULATION_STEP_DELAY)
+                    self.p_bar.update(1)
 
-        reward = self.update_reward()
-        done = True if reward == 1 else False
-        info = dict(box_opened=self.box_opened, btn_pressed=self.btn_pressed, box_closed=self.box_closed)
-        return self.get_observation(), reward, done, info
+    def get_ee_pos(self):
+        pos, orn = self.robot.get_ee_pos()
+        return pos, orn
 
-    def update_reward(self):
-        reward = 0
-        if not self.box_opened:
-            if p.getJointState(self.boxID, 1)[0] > 1.9:
-                self.box_opened = True
-                print('Box opened!')
-        elif not self.btn_pressed:
-            if p.getJointState(self.boxID, 0)[0] < - 0.02:
-                self.btn_pressed = True
-                print('Btn pressed!')
-        else:
-            if p.getJointState(self.boxID, 1)[0] < 0.1:
-                print('Box closed!')
-                self.box_closed = True
-                reward = 1
-        return reward
+    def get_camera_pos(self):
+        return self.camera.get_pose()
+
+    def get_object_pos(self, object_id):
+        pos, orn = p.getBasePositionAndOrientation(object_id)
+        return pos, orn
+
+    def get_all_pos(self):
+        """
+        获取环境中所有重要对象的位姿信息
+        Returns:
+            dict: 包含以下键值对：
+                - 'end_effector': (position, orientation) 末端执行器位姿
+                - 'camera': (position, orientation) 相机位姿
+                - 'object': (position, orientation) 物体位姿（如果有）
+                - 'target': (position, orientation) 目标位姿（如果有）
+        """
+        poses = {
+            'end_effector': self.get_ee_pos(),
+            'camera': self.get_camera_pos()
+        }
+        
+        # 如果有物体，添加物体位姿
+        if hasattr(self, 'object_id'):
+            poses['object'] = self.get_object_pos(self.object_id)
+            
+        # 如果有目标位置，添加目标位姿
+        if hasattr(self, 'target_pos') and hasattr(self, 'target_orn'):
+            poses['target'] = (self.target_pos, self.target_orn)
+            
+        return poses
+
+    def reset(self):
+        self.robot.reset()
 
     def get_observation(self):
         obs = dict()
@@ -123,15 +117,6 @@ class ClutteredPushGrasp:
         obs.update(self.robot.get_joint_obs())
 
         return obs
-
-    def reset_box(self):
-        p.setJointMotorControl2(self.boxID, 0, p.POSITION_CONTROL, force=1)
-        p.setJointMotorControl2(self.boxID, 1, p.VELOCITY_CONTROL, force=0)
-
-    def reset(self):
-        self.robot.reset()
-        self.reset_box()
-        return self.get_observation()
 
     def close(self):
         p.disconnect(self.physicsClient)

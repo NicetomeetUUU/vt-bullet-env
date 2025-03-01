@@ -7,58 +7,107 @@ import torch
 import cv2
 from scipy import ndimage
 import numpy as np
+import os
 
+class ModelLoader:
+    def __init__(self, urdf_file: str):
+        """
+        初始化模型加载器
+        Args:
+            urdf_file: URDF文件路径
+        """
+        self.urdf_file = urdf_file
+        self.body_id = None
 
-class Models:
-    def load_objects(self):
-        raise NotImplementedError
+    def load_object(self, position=(0,0,0), scale=1.0):
+        """
+        加载模型到PyBullet世界
+        Args:
+            position: 模型的初始位置，默认(0,0,0)
+            scale: 模型的统一缩放比例，默认1.0
+        Returns:
+            int: PyBullet中的body ID
+        """
+        print(f'Loading {self.urdf_file}')
+        self.body_id = p.loadURDF(self.urdf_file,
+                               basePosition=position,
+                               globalScaling=scale)
+        return self.body_id
+    
+    def remove_object(self):
+        """从PyBullet世界中移除模型"""
+        if self.body_id is not None:
+            p.removeBody(self.body_id)
+            self.body_id = None
 
-    def __len__(self):
-        raise NotImplementedError
+from scipy.spatial.transform import Rotation
 
-    def __getitem__(self, item):
-        return NotImplementedError
+class PointCloudProcessor:
+    def __init__(self):
+        pass
 
+    @staticmethod
+    def depth_to_point_cloud(depth_img, intrinsic_matrix, depth_scale=1000.0):
+        """将深度图转换为点云
+        Args:
+            depth_img: 深度图像 (H, W)
+            intrinsic_matrix: 相机内参矩阵 (3, 3)
+            depth_scale: 深度缩放因子
+        Returns:
+            points: 点云数据 (N, 3)
+        """
+        height, width = depth_img.shape
+        fx = intrinsic_matrix[0, 0]
+        fy = intrinsic_matrix[1, 1]
+        cx = intrinsic_matrix[0, 2]
+        cy = intrinsic_matrix[1, 2]
 
-class YCBModels(Models):
-    def __init__(self, root, selected_names: tuple = ()):
-        self.obj_files = glob.glob(root)
-        self.selected_names = selected_names
+        # 生成像素网格
+        x, y = np.meshgrid(np.arange(width), np.arange(height))
+        x = (x - cx) * depth_img / fx
+        y = (y - cy) * depth_img / fy
+        z = depth_img
 
-        self.visual_shapes = []
-        self.collision_shapes = []
+        # 将点云整形为(N, 3)的形式
+        points = np.stack([x, y, z], axis=-1)
+        points = points.reshape(-1, 3)
 
-    def load_objects(self):
-        shift = [0, 0, 0]
-        mesh_scale = [1, 1, 1]
+        # 移除无效点（深度为0或无穷大的点）
+        mask = (points[:, 2] > 0) & (points[:, 2] < np.inf)
+        points = points[mask]
 
-        for filename in self.obj_files:
-            # Check selected_names
-            if self.selected_names:
-                in_selected = False
-                for name in self.selected_names:
-                    if name in filename:
-                        in_selected = True
-                if not in_selected:
-                    continue
-            print('Loading %s' % filename)
-            self.collision_shapes.append(
-                p.createCollisionShape(shapeType=p.GEOM_MESH,
-                                       fileName=filename,
-                                       collisionFramePosition=shift,
-                                       meshScale=mesh_scale))
-            self.visual_shapes.append(
-                p.createVisualShape(shapeType=p.GEOM_MESH,
-                                    fileName=filename,
-                                    visualFramePosition=shift,
-                                    meshScale=mesh_scale))
+        return points / depth_scale
 
-    def __len__(self):
-        return len(self.collision_shapes)
+    @staticmethod
+    def crop_point_cloud(points, center, radius):
+        """截取点云中心点附近的点云
+        Args:
+            points: 点云数据 (N, 3)
+            center: 中心点坐标 [x, y, z]
+            radius: 截取半径
+        Returns:
+            cropped_points: 截取后的点云 (M, 3)
+        """
+        center = np.array(center)
+        distances = np.linalg.norm(points - center, axis=1)
+        mask = distances <= radius
+        return points[mask]
 
-    def __getitem__(self, idx):
-        return self.visual_shapes[idx], self.collision_shapes[idx]
-
+    @staticmethod
+    def transform_point_cloud(points, translation, rotation):
+        """对点云进行旋转平移变换
+        Args:
+            points: 点云数据 (N, 3)
+            translation: 平移向量 [x, y, z]
+            rotation: 旋转矩阵 (3, 3) 或四元数 [x, y, z, w]
+        Returns:
+            transformed_points: 变换后的点云 (N, 3)
+        """
+        if rotation.shape == (4,):  # 四元数
+            rotation = Rotation.from_quat(rotation).as_matrix()
+        
+        transformed_points = points @ rotation.T + translation
+        return transformed_points
 
 class Camera:
     def __init__(self, robot_id=None, ee_id=None, size=(1280, 720), near=0.105, far=10.0, fov=69.4,
@@ -205,6 +254,27 @@ class Camera:
         noisy_depth = depth + noise + depth_noise
         return np.clip(noisy_depth, self.near, self.far)
     
+    def get_pose(self):
+        """
+        获取相机在世界坐标系中的位姿
+        Returns:
+            tuple: (position, orientation)
+                - position: 相机位置 (x, y, z)
+                - orientation: 相机姿态四元数 (x, y, z, w)
+        """
+        if self.robot_id is not None and self.ee_id is not None:
+            # 获取末端执行器的位置和方向
+            ee_state = p.getLinkState(self.robot_id, self.ee_id, computeForwardKinematics=True)
+            ee_pos = ee_state[4]
+            ee_orn = ee_state[5]
+            
+            # 计算相机的位置和方向
+            cam_pos, cam_orn = p.multiplyTransforms(ee_pos, ee_orn, self.relative_pos, self.relative_orn)
+            return cam_pos, cam_orn
+        else:
+            # 如果没有绑定到机器人，返回固定视角
+            return (1, 1, 1), p.getQuaternionFromEuler((0, 0, 0))
+
     def shot(self):
         # 获取当前相机矩阵
         view_matrix, projection_matrix = self._get_camera_matrices()

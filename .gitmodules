@@ -1,0 +1,3 @@
+[submodule "functions/anygrasp_sdk"]
+	path = functions/anygrasp_sdk
+	url = https://github.com/graspnet/anygrasp_sdk.git
