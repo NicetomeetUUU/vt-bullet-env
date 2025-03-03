@@ -47,7 +47,7 @@ class ActionWrapper:
             # 控制夹爪
             self.robot.move_gripper(action.gripper.width)
         elif isinstance(action, GripperAction):
-            # 只控制夹爪
+            # 控制夹爪的同时保持机器人当前姿态
             self.robot.move_gripper(action.gripper.width)
         else:
             raise ValueError(f"Unsupported action type: {type(action)}")

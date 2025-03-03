@@ -42,6 +42,63 @@ class ModelLoader:
 
 from scipy.spatial.transform import Rotation
 
+class CoordinateFrameVisualizer:
+    def __init__(self, axis_length=0.1, line_width=3.0):
+        """
+        初始化坐标系可视化器
+        Args:
+            axis_length: 坐标轴长度（米）
+            line_width: 线条宽度
+        """
+        self.axis_length = axis_length
+        self.line_width = line_width
+        self.frame_ids = {}
+    
+    def visualize_frame(self, position, orientation, name='frame'):
+        """
+        可视化一个坐标系
+        Args:
+            position: [x, y, z] 坐标系原点位置
+            orientation: [x, y, z, w] 四元数表示的方向
+            name: 坐标系名称，用于更新或删除
+        """
+        # 如果已存在同名坐标系，先移除
+        if name in self.frame_ids:
+            self.remove_frame(name)
+            
+        # 计算坐标轴终点
+        rot_matrix = p.getMatrixFromQuaternion(orientation)
+        rot_matrix = np.array(rot_matrix).reshape(3, 3)
+        
+        x_end = np.array(position) + self.axis_length * rot_matrix[:, 0]
+        y_end = np.array(position) + self.axis_length * rot_matrix[:, 1]
+        z_end = np.array(position) + self.axis_length * rot_matrix[:, 2]
+        
+        # 绘制三个坐标轴（RGB对应XYZ）
+        frame_ids = [
+            p.addUserDebugLine(position, x_end, [1, 0, 0], self.line_width),  # X轴 - 红色
+            p.addUserDebugLine(position, y_end, [0, 1, 0], self.line_width),  # Y轴 - 绿色
+            p.addUserDebugLine(position, z_end, [0, 0, 1], self.line_width)   # Z轴 - 蓝色
+        ]
+        
+        self.frame_ids[name] = frame_ids
+    
+    def remove_frame(self, name):
+        """
+        移除指定的坐标系
+        Args:
+            name: 要移除的坐标系名称
+        """
+        if name in self.frame_ids:
+            for line_id in self.frame_ids[name]:
+                p.removeUserDebugItem(line_id)
+            del self.frame_ids[name]
+    
+    def remove_all_frames(self):
+        """移除所有坐标系"""
+        for name in list(self.frame_ids.keys()):
+            self.remove_frame(name)
+
 class PointCloudProcessor:
     def __init__(self):
         pass
@@ -79,18 +136,59 @@ class PointCloudProcessor:
         return points / depth_scale
 
     @staticmethod
-    def crop_point_cloud(points, center, radius):
-        """截取点云中心点附近的点云
+    def camera_to_world(points, camera_pose):
+        """将相机坐标系下的点云转换到世界坐标系
+        Args:
+            points: 相机坐标系下的点云数据 (N, 3)
+            camera_pose: 相机位姿，包含:
+                - position: 相机位置 [x, y, z]
+                - orientation: 相机方向四元数 [x, y, z, w]
+        Returns:
+            world_points: 世界坐标系下的点云 (N, 3)
+        """
+        position = np.array(camera_pose[0])
+        orientation = np.array(camera_pose[1])
+        
+        # 将四元数转换为旋转矩阵
+        rotation = Rotation.from_quat(orientation).as_matrix()
+        
+        # 先旋转再平移
+        world_points = points @ rotation.T + position
+        return world_points
+
+    @staticmethod
+    def crop_points_near_grasp(points, grasp_pose, gripper_width):
+        """截取抓取位姿附近的点云（立方体区域）
         Args:
             points: 点云数据 (N, 3)
-            center: 中心点坐标 [x, y, z]
-            radius: 截取半径
+            grasp_pose: 抓取位姿，包含:
+                - position: 位置 [x, y, z]
+                - orientation: 方向四元数 [x, y, z, w]
+            gripper_width: 夹爪宽度
         Returns:
             cropped_points: 截取后的点云 (M, 3)
         """
-        center = np.array(center)
-        distances = np.linalg.norm(points - center, axis=1)
-        mask = distances <= radius
+        position = np.array(grasp_pose[0])
+        orientation = np.array(grasp_pose[1])
+        
+        # 将点云变换到夹爪坐标系
+        rotation = Rotation.from_quat(orientation).as_matrix()
+        points_local = (points - position) @ rotation
+        
+        # 定义立方体边界
+        half_width = gripper_width / 2
+        bounds = np.array([
+            [-half_width, half_width],  # x轴（夹爪宽度方向）
+            [-half_width, half_width],  # y轴（夹爪厚度方向）
+            [-half_width, half_width]   # z轴（夹爪长度方向）
+        ])
+        
+        # 截取立方体区域内的点
+        mask = np.all((
+            points_local >= bounds[:, 0].reshape(1, 3)) & 
+            (points_local <= bounds[:, 1].reshape(1, 3)
+        ), axis=1)
+        
         return points[mask]
 
     @staticmethod
@@ -103,7 +201,7 @@ class PointCloudProcessor:
         Returns:
             transformed_points: 变换后的点云 (N, 3)
         """
-        if rotation.shape == (4,):  # 四元数
+        if isinstance(rotation, np.ndarray) and rotation.shape == (4,):  # 四元数
             rotation = Rotation.from_quat(rotation).as_matrix()
         
         transformed_points = points @ rotation.T + translation
@@ -111,7 +209,7 @@ class PointCloudProcessor:
 
 class Camera:
     def __init__(self, robot_id=None, ee_id=None, size=(1280, 720), near=0.105, far=10.0, fov=69.4,
-                 enable_noise=False, enable_distortion=False):
+                 enable_noise=False, enable_distortion=False, position=None, target=None, up_vector=None):
         """Initialize camera with RealSense D435 parameters
         Args:
             robot_id: Robot ID if attached to a robot
@@ -122,15 +220,40 @@ class Camera:
             fov: Horizontal field of view (degrees), D435 default is 69.4°
             enable_noise: Enable depth noise simulation
             enable_distortion: Enable lens distortion simulation
+            position: 相机在世界坐标系中的位置 (x,y,z)，如果为None则使用默认位置
+            target: 相机观察的目标点 (x,y,z)，如果为None则观察原点
+            up_vector: 相机向上的方向 (x,y,z)，如果为None则使用z轴正方向
         """
         self.width, self.height = size
         self.near, self.far = near, far
         self.fov = fov
         self.aspect = self.width / self.height
         
-        # 相机相对于末端执行器的偏移
-        self.relative_pos = (0.0, 0.0, 0.10)  # 相对位置：空间略有偏移，防止完全重合
-        self.relative_orn = p.getQuaternionFromEuler((0, 0, 0))  # 相对方向：与夹爪保持一致
+        # 如果相机附着在机器人上，保存相对位姿
+        if robot_id is not None:
+            self.relative_pos = (0.0, 0.0, 0.10)  # 相对位置：空间略有偏移，防止完全重合
+            self.relative_orn = p.getQuaternionFromEuler((0, 0, 0))  # 相对方向：与夹爪保持一致
+
+        else:
+            # 确保使用传入的position参数
+            camera_pos = position if position is not None else (1.0, 0.0, 0.5)
+            camera_target = target if target is not None else (0.0, 0.0, 0.0)
+            camera_up = up_vector if up_vector is not None else (0.0, 0.0, 1.0)
+            
+            self.view_matrix = p.computeViewMatrix(
+                cameraEyePosition=camera_pos,
+                cameraTargetPosition=camera_target,
+                cameraUpVector=camera_up
+            )
+            self.proj_matrix = p.computeProjectionMatrixFOV(
+                fov=self.fov,
+                aspect=self.aspect,
+                nearVal=self.near,
+                farVal=self.far
+            )
+            self.world_position = camera_pos
+            self.target_position = camera_target
+            self.up_vector = camera_up
         
         self.robot_id = robot_id
         self.ee_id = ee_id
@@ -154,8 +277,6 @@ class Camera:
         self.depth_noise_mean = 0.0
         self.baseline_noise = 0.001  # 基线噪声
         self.depth_noise_factor = 0.001  # 与深度相关的噪声因子
-
-        # 初始化时不需要计算变换矩阵，因为相机位置是动态的
 
     def _get_camera_matrices(self):
         """Get the current view and projection matrices
@@ -185,11 +306,9 @@ class Camera:
             # 更新视图矩阵
             view_matrix = p.computeViewMatrix(cam_pos, target_pos, up_vec)
         else:
-            # 如果没有绑定到机器人，使用固定视角
-            view_matrix = p.computeViewMatrix((1, 1, 1), (0, 0, 0), (0, 0, 1))
-        
-        # 计算投影矩阵
-        projection_matrix = p.computeProjectionMatrixFOV(self.fov, self.aspect, self.near, self.far)
+            # 如果没有绑定到机器人，使用初始化时设置的视角
+            view_matrix = self.view_matrix
+            projection_matrix = self.proj_matrix
         
         return view_matrix, projection_matrix
         
@@ -272,8 +391,25 @@ class Camera:
             cam_pos, cam_orn = p.multiplyTransforms(ee_pos, ee_orn, self.relative_pos, self.relative_orn)
             return cam_pos, cam_orn
         else:
-            # 如果没有绑定到机器人，返回固定视角
-            return (1, 1, 1), p.getQuaternionFromEuler((0, 0, 0))
+            # 如果没有绑定到机器人，返回存储的相机位姿
+            # 计算相机方向
+            forward = np.array(self.target_position) - np.array(self.world_position)
+            forward = forward / np.linalg.norm(forward)
+            
+            # 使用右手坐标系规则计算相机方向
+            up = np.array(self.up_vector)
+            right = np.cross(forward, up)
+            right = right / np.linalg.norm(right)
+            up = np.cross(right, forward)
+            
+            # 构建旋转矩阵
+            rot_matrix = np.array([right, up, -forward]).T
+            
+            # 转换为四元数
+            r = Rotation.from_matrix(rot_matrix)
+            orientation = r.as_quat()  # 返回 [x, y, z, w] 格式的四元数
+            
+            return self.world_position, orientation
 
     def shot(self):
         # 获取当前相机矩阵

@@ -12,142 +12,6 @@ import time
 import math
 import cv2
 
-def display_camera_data(rgb, depth, seg):
-    # 转换 RGB 图像格式
-    rgb = rgb[:, :, :3]  # 移除 alpha 通道
-    rgb = (rgb * 255).astype(np.uint8)  # 转换为0-255范围
-    rgb = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)  # 转换为BGR格式
-    
-    # 归一化深度图像用于显示
-    depth_normalized = cv2.normalize(depth, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
-    depth_colormap = cv2.applyColorMap(depth_normalized, cv2.COLORMAP_JET)
-    
-    # 归一化分割图像用于显示
-    seg_normalized = cv2.normalize(seg, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
-    
-    # 创建组合图像
-    combined = np.hstack((rgb, depth_colormap, cv2.cvtColor(seg_normalized, cv2.COLOR_GRAY2BGR)))
-    
-    # 显示图像
-    cv2.imshow('Camera View (RGB | Depth | Segmentation)', combined)
-    cv2.waitKey(1)  # 1ms 延迟，允许窗口更新
-
-
-def user_control_demo():
-    # 创建机器人
-    robot = UR5Robotiq140((0, 0.5, 0), (0, 0, 0))
-    grasp_bridge = GraspBridge(save_dir='./grasp_data')
-    object_00 = ModelLoader(urdf_file="/home/iccd-simulator/code/vt-bullet-env/models/002/object.urdf")
-    
-    # 创建位姿可视化器
-    visualizer = PoseVisualizer(size=0.1)
-    
-    # 初始化环境（这会加载机器人）
-    env = VTGraspRefine(robot, vis=True)
-    
-    # 现在机器人已经加载，可以创建相机
-    camera = Camera(
-        robot_id=robot._id,
-        ee_id=robot.end_effector_index(),
-        near=0.1,
-        far=5.0,
-        fov=60
-    )
-    
-    # 设置环境的相机（如果想绑定相机到机械臂末端，必须等robot载入到环境内后执行）
-    env.camera = camera
-
-    # 导入物体（可以动态导入倒是）
-    object_00.load_object(position=(0, 0, 0.3))
-    env.step_simulation()
-    
-    # 设置触觉传感器
-    digits = tacto.Sensor(width=120, height=160, visualize_gui=True)
-    digits.add_camera(robot.id, robot.digit_links)
-    env.reset()
-    env.step_simulation()
-    
-    # 导入动作类
-    from actions import JointAction, PoseAction, GripperCommand
-    
-    while True:    
-        # 获取当前状态
-        current_pos, current_orn = robot.get_ee_pos()
-        print('Current end-effector position:', current_pos)
-        
-        # 获取相机和触觉传感器数据
-        rgb, depth, seg = camera.shot()
-        color, tactile_depth = digits.render()
-        digits.updateGUI(color, tactile_depth)
-        # display_camera_data(rgb, depth, seg)
-        
-        # 等待用户输入
-        cmd = input('Commands: (q)uit, (j)oint control, (p)ose control, (o)pen gripper, (c)lose gripper: ')
-        
-        if cmd.lower() == 'q':
-            break
-        elif cmd.lower() == 'j':
-            # 关节空间控制示例
-            joint_action = JointAction(
-                joint_positions=[0, -1.57, 1.57, -1.57, -1.57, 0],
-                gripper=GripperCommand(width=0.085)
-            )
-            env.step_actions(joint_action)
-            
-        elif cmd.lower() == 'p':
-            # 末端位姿控制示例
-            next_pos = (current_pos[0] + 0.1, current_pos[1], current_pos[2] + 0.1)
-            pose_action = PoseAction(
-                position=next_pos,
-                orientation=current_orn,
-                gripper=GripperCommand(width=0.085)
-            )
-            env.step_actions(pose_action)
-            
-        elif cmd.lower() == 'o':
-            # 开合器示例
-            current_pos, current_orn = robot.get_ee_pos()
-            gripper_action = PoseAction(
-                position=current_pos,
-                orientation=current_orn,  # 使用当前姿态
-                gripper=GripperCommand(width=0.140)
-            )
-            env.step_actions(gripper_action)
-            
-        elif cmd.lower() == 'c':
-            # 关合器示例
-            current_pos, current_orn = robot.get_ee_pos()
-            gripper_action = PoseAction(
-                position=current_pos,
-                orientation=current_orn,  # 使用当前姿态
-                gripper=GripperCommand(width=0.0)
-            )
-            env.step_actions(gripper_action)
-        
-        # 执行仿真步骤
-        for i in range(20):  # 减少循环次数
-            # 每5步更新一次传感器数据
-            env.step_simulation()
-
-            if i % 5 == 0:
-                # 获取并更新位姿可视化
-                ee_pos, ee_orn = robot.get_ee_pos()
-                visualizer.update_pose('End Effector', ee_pos, ee_orn)
-                
-                camera_pos, camera_orn = camera.get_pose()
-                visualizer.update_pose('Camera', camera_pos, camera_orn)
-                
-                # # 获取触觉传感器位姿
-                # digits_pos = p.getLinkState(robot._id, robot.digit_id)[0]
-                # digits_orn = p.getLinkState(robot._id, robot.digit_id)[1]
-                # visualizer.update_pose('Digits', digits_pos, digits_orn)
-                
-                # 更新传感器数据
-                rgb, depth, seg = camera.shot()
-                color, tactile_depth = digits.render()
-                digits.updateGUI(color, tactile_depth)
-                # display_camera_data(rgb, depth, seg)
-
 class TactileDataCollector:
 
     def __init__(self, save_dir, visualize_gui = True):
@@ -158,71 +22,92 @@ class TactileDataCollector:
             visualize_gui (bool): 是否可视化GUI
         """
         self.save_dir = save_dir
+        self.visualize_gui = visualize_gui
+        
+        # 初始化机器人和环境
         robot = UR5Robotiq140((0, 0.5, 0), (0, 0, 0))
         self.env = VTGraspRefine(robot, vis=visualize_gui)
         os.makedirs(save_dir, exist_ok=True)
-        # 创建相机
+        
+        # 创建固定在世界坐标系中的相机
+        camera_distance = 0.5  # 相机到观察点的距离
+        camera_position = [0,  # x
+                         -camera_distance * math.cos(math.pi/4),  # y
+                          0.5]  # z
+        camera_target = [0, 0, 0]  # 相机观察的目标点（世界坐标系原点）
+        up_vector = [0, 0, 1]  # 相机向上的方向
+        
         camera = Camera(
-            robot_id=robot._id,
-            ee_id=robot.end_effector_index(),
+            robot_id=None,  # 不附着在机器人上
+            ee_id=None,    # 不附着在末端执行器上
             near=0.1,
             far=5.0,
-            fov=60
+            fov=60,
+            position=camera_position,
+            target=camera_target,
+            up_vector=up_vector
         )
-        object_00 = ModelLoader(urdf_file="/home/iccd-simulator/code/vt-bullet-env/models/002/object.urdf")
-        # 设置环境的相机（如果想绑定相机到机械臂末端，必须等robot载入到环境内后执行）
+        print("展示信息camera:", camera.get_pose())
+        # 设置环境的相机
         self.env.camera = camera
-        # 导入物体（可以动态导入倒是）
-        object_00.load_object(position=(0, 0, 0.3))
-        self.env.step_simulation()
+        
+        for _ in range(50):
+            self.env.step_simulation()
         
         # 设置触觉传感器
         self.digits = tacto.Sensor(width=120, height=160, visualize_gui=visualize_gui)
         self.digits.add_camera(robot._id, robot.digit_links)
         self.env.reset()
-        self.env.step_simulation()
+        for _ in range(50):
+            self.env.step_simulation()
         
         # 初始化对象列表
         self.object_list = []
-
-    def add_object(self, urdf_file, position):
-        """添加物体到场景
         
+        # 初始化相机和触觉传感器的可视化
+        if visualize_gui:
+            # 渲染相机图像
+            rgb, depth, seg = self.env.camera.shot()
+            # 渲染触觉传感器数据
+            tactile_rgb, tactile_depth = self.digits.render()
+            self.digits.updateGUI(tactile_rgb, tactile_depth)
+            # 执行几步仿真使显示更稳定
+            for _ in range(10):
+                self.env.step_simulation()
+        
+        rgb, depth, seg = self.env.camera.shot()
+
+    def add_object(self, urdf_file, position=(0, 0, 0)):
+        """添加物体到场景
         Args:
             urdf_file (str): URDF文件路径
-            position (tuple): 物体位置 (x, y, z)
-            
+            position (tuple): 期望放置物体的位置 (x, y, z)，默认为原点
         Returns:
             int: 物体的ID
         """
-        object_loaded = ModelLoader(urdf_file=urdf_file)
-        obj_id = object_loaded.load_object(position=position)
-        self.object_list.append({
-            'id': obj_id,
-            'urdf': urdf_file,
-            'position': position
-        })
-        self.env.step_simulation()
-        return obj_id
+        # 直接调用环境的add_object方法
+        return self.env.add_object(urdf_file=urdf_file, position=position)
         
     def remove_objects(self, object_ids=None):
         """删除场景中的物体
-        
         Args:
-            object_ids (list, optional): 要删除的物体ID列表。如果为None，删除所有物体
+            object_ids (int or list, optional): 要删除的物体ID或ID列表。如果为None，删除所有物体
         """
-        if object_ids is None:
-            # 删除所有物体
-            for obj in self.object_list:
-                p.removeBody(obj['id'])
-            self.object_list.clear()
-        else:
-            # 删除指定ID的物体
-            self.object_list = [obj for obj in self.object_list if obj['id'] not in object_ids]
-            for obj_id in object_ids:
-                p.removeBody(obj_id)
-        
-        self.env.step_simulation()
+        try:
+            if object_ids is None:
+                # 删除所有物体
+                self.env.remove_all_objects()
+            else:
+                # 将单个ID转换为列表
+                if isinstance(object_ids, int):
+                    object_ids = [object_ids]
+                    
+                # 删除指定ID的物体
+                for obj_id in object_ids:
+                    self.env.remove_object(obj_id)
+                    
+        except Exception as e:
+            print(f"删除物体时发生错误: {e}")
         
         
     def collect_tactile_data(self):
@@ -230,6 +115,10 @@ class TactileDataCollector:
         rgb, depth = self.digits.render()
         if (self.visualize_gui):
             self.digits.updateGUI(rgb, depth)
+            # 增加物理仿真步数和延时使渲染更流畅
+            for i in range(20):
+                self.env.step_simulation()
+                time.sleep(0.01)  # 10ms延时
         return rgb, depth
         
     def move_to_grasp_pose(self, target_pos, target_orn, gripper_width=0.04):
@@ -249,14 +138,14 @@ class TactileDataCollector:
             gripper=GripperCommand(width=gripper_width)
         )
         
-        # 执行动作
-        self.env.step_actions(action, 100)
-        
+        # 执行动作并添加延时使运动更流畅
+        self.env.step_actions(action, 240)
+
     def control_gripper(self, gripper_width):
         """控制夹爪开合
         
         Args:
-            gripper_width (float): 夹爪开合宽度，0.0表示完全关闭，0.04表示完全打开
+            gripper_width (float): 夹爪开合宽度，0.0表示完全关闭，0.14表示完全打开
         """
         from actions import GripperAction, GripperCommand
         
@@ -264,8 +153,8 @@ class TactileDataCollector:
         action = GripperAction(
             gripper=GripperCommand(width=gripper_width)
         )
-        # 执行动作
-        self.env.step_actions(action, 10)
+        # 执行动作并添加延时使运动更流畅
+        self.env.step_actions(action, 240)
     
     def reset(self):
         """重置环境"""
@@ -275,6 +164,17 @@ class TactileDataCollector:
         """获取当前抓取位姿"""
         return self.env.get_poses()
     
+    def get_camera_image(self):
+        """获取相机图像
+        
+        Returns:
+            tuple: (rgb, depth, seg)
+                - rgb: RGB图像数据
+                - depth: 深度图数据
+                - seg: 分割图数据
+        """
+        return self.env.camera.shot()
+    
     def __del__(self):
         """析构函数，用于清理资源"""
         try:
@@ -282,8 +182,8 @@ class TactileDataCollector:
             self.remove_objects()
             
             # 关闭GUI窗口
-            if hasattr(self, 'digits'):
-                self.digits.close()
+            if hasattr(self, 'digits') and hasattr(self.digits, '_gui'):
+                self.digits._gui.close()
             
             # 断开PyBullet连接
             if hasattr(self, 'env') and self.env.physicsClient is not None:
@@ -292,4 +192,72 @@ class TactileDataCollector:
             print(f"Error during cleanup: {e}")
     
 if __name__ == '__main__':
-    user_control_demo()
+    import time
+    import numpy as np
+    
+    # 创建环境
+    collector = TactileDataCollector(save_dir='./grasp_data')
+    
+    try:
+        while True:
+            print("\n可用命令:")
+            print("1: 添加物体")
+            print("2: 移除物体")
+            print("3: 移动到抓取位姿")
+            print("4: 控制夹爪")
+            print("5: 采集触觉数据")
+            print("6: 重置环境")
+            print("q: 退出")
+            
+            cmd = input('\n请输入命令: ')
+            
+            if cmd == 'q':
+                break
+                
+            elif cmd == '1':
+                # 添加物体
+                urdf_path = "/home/iccd-simulator/code/vt-bullet-env/models/000/object.urdf"
+                position = (0.3, 0, 0.1)
+                obj_id = collector.add_object(urdf_path)
+                #obj_id = collector.add_object(urdf_path, position)
+                print(f"物体添加成功，ID: {obj_id}")
+                
+            elif cmd == '2':
+                # 移除物体
+                collector.remove_objects()
+                print("所有物体已移除")
+                
+            elif cmd == '3':
+                # 测试不同的抓取位姿
+                poses = [
+                    # 位置，姿态（四元数）
+                    ((0.3, 0.5, 0.3), (0, 0, 0, 1)),  # 上方
+                ]
+                
+                for pos, orn in poses:
+                    print(f"\n移动到位置: {pos}, 姿态: {orn}")
+                    collector.move_to_grasp_pose(pos, orn)
+                    time.sleep(1)
+                
+            elif cmd == '4':
+                # 控制夹爪
+                gripper_width = float(input("请输入夹爪开合宽度（0.0表示完全关闭，0.14表示完全打开）："))
+                collector.control_gripper(gripper_width)
+                # 执行足够多的仿真步骤以确保动作完成
+                
+            elif cmd == '5':
+                # 采集触觉数据
+                rgb, depth = collector.collect_tactile_data()
+                # print(f"\n触觉数据尺寸: RGB {rgb.shape}, Depth {depth.shape}")
+                
+            elif cmd == '6':
+                # 重置环境
+                collector.reset()
+                print("环境已重置")
+            
+            else:
+                print("无效命令")
+                
+    finally:
+        # 清理资源
+        collector.__del__()

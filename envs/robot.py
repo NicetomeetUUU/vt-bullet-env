@@ -102,6 +102,11 @@ class RobotBase(object):
         """
         for rest_pose, joint_id in zip(self.arm_rest_poses, self.arm_controllable_joints):
             p.resetJointState(self._id, joint_id, rest_pose)
+            # 设置为位置控制模式，并使用足够的力矩来维持位置
+            p.setJointMotorControl2(self._id, joint_id, p.POSITION_CONTROL,
+                                  targetPosition=rest_pose,
+                                  force=self.joints[joint_id].maxForce,
+                                  maxVelocity=self.joints[joint_id].maxVelocity)
 
         # Wait for a few steps
         for _ in range(10):
@@ -239,7 +244,7 @@ class UR5Robotiq140(UR5Robotiq85):
         # self._physics_client = physics_client
         physics_client = px.current_client()
         self._physics_client = physics_client
-
+        
     def __post_load__(self):
         mimic_parent_name = 'finger_joint'
         mimic_children_names = {'right_outer_knuckle_joint': -1,
@@ -248,7 +253,7 @@ class UR5Robotiq140(UR5Robotiq85):
                                 'left_inner_finger_joint': 1,
                                 'right_inner_finger_joint': 1}
         self.__setup_mimic_joints__(mimic_parent_name, mimic_children_names)
-        
+
     def move_joints(self, joints_poses):
         assert len(joints_poses) == self.arm_num_dofs
         # arm
@@ -285,7 +290,7 @@ class UR5Robotiq140(UR5Robotiq85):
                                 targetPosition=open_angle,
                                 force=self.joints[self.mimic_parent_id].maxForce, 
                                 maxVelocity=self.joints[self.mimic_parent_id].maxVelocity)
-
+                                
     """
     以下为导入digit传感器默认需要的属性
     """
