@@ -2,5 +2,7 @@
 /.vscode    
 /.gitignore
 /envs/grasp_data
-/envs/old_main.py
+/envs/old_files
 /models
+/docs
+/envs/datasets

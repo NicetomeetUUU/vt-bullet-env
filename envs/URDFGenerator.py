@@ -388,4 +388,4 @@ def check_coordinate_systems(model_dir):
 
 if __name__ == "__main__":
     main()
-    # check_coordinate_systems("../models/000")
+    check_coordinate_systems("../models/000")
