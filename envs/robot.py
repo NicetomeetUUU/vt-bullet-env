@@ -227,21 +227,23 @@ class UR5Robotiq85(RobotBase):
 
 
 class UR5Robotiq140(UR5Robotiq85):
-    def __init__(self, pos, ori):
+    def __init__(self, pos=None, ori=None):
+        if pos is None:
+            pos = [0, 0, 0]
+        if ori is None:
+            ori = [0, 0, 0]
         super().__init__(pos, ori)
         
     def __init_robot__(self):
         self.eef_id = 7
         self.arm_num_dofs = 6
+        # 调整休息姿势，使其更适合IK求解
         self.arm_rest_poses = [-1.5690622952052096, -1.5446774605904932, 1.343946009733127, -1.3708613585093699,
                                -1.5707970583733368, 0.0009377758247187636]
         self._id = p.loadURDF('./urdf/ur5_robotiq_140.urdf', self.base_pos, self.base_ori,
                              useFixedBase=True, flags=p.URDF_ENABLE_CACHED_GRAPHICS_SHAPES)
         # Robotiq 140 有更大的开合范围
         self.gripper_range = [0, 0.140]  # 0-140mm
-        # if physics_client is None:
-        #     physics_client = px.current_client()
-        # self._physics_client = physics_client
         physics_client = px.current_client()
         self._physics_client = physics_client
         
@@ -258,16 +260,60 @@ class UR5Robotiq140(UR5Robotiq85):
         assert len(joints_poses) == self.arm_num_dofs
         # arm
         for i, joint_id in enumerate(self.arm_controllable_joints):
-            p.setJointMotorControl2(self._id, joint_id, p.POSITION_CONTROL, joint_poses[i],
+            p.setJointMotorControl2(self._id, joint_id, p.POSITION_CONTROL, joints_poses[i],
                                     force=self.joints[joint_id].maxForce, maxVelocity=self.joints[joint_id].maxVelocity)
     
+    # def move_pose(self, pos, orn):
+    #     arm_rest_poses = [-3.14, -1.5446774605904932, 1.343946009733127, -1.3708613585093699,
+    #                     -1.5707970583733368, 0.0009377758247187636]
+    #     joint_poses = p.calculateInverseKinematics(self._id, self.eef_id, pos, orn,
+    #                                                 self.arm_lower_limits, self.arm_upper_limits, self.arm_joint_ranges, arm_rest_poses,
+    #                                                 maxNumIterations=100,
+    #                                                 residualThreshold=2e-3)
+    #     for i, joint_id in enumerate(self.arm_controllable_joints):
+    #         p.setJointMotorControl2(self._id, joint_id, p.POSITION_CONTROL, joint_poses[i],
+    #                                 force=self.joints[joint_id].maxForce, maxVelocity=self.joints[joint_id].maxVelocity)
+
     def move_pose(self, pos, orn):
-        joint_poses = p.calculateInverseKinematics(self.id, self.eef_id, pos, orn,
-                                                    self.arm_lower_limits, self.arm_upper_limits, self.arm_joint_ranges, self.arm_rest_poses,
-                                                    maxNumIterations=20)
+        # print("IK求解前的目标位姿: ", pos, orn)
+        print("arm_upper_limits: ", self.arm_upper_limits)
+        print("arm_lower_limits: ", self.arm_lower_limits)
+        print("arm_joint_ranges: ", self.arm_joint_ranges)
+        print("arm_rest_poses: ", self.arm_rest_poses)
+        joint_poses = p.calculateInverseKinematics(self._id, self.eef_id, pos, orn,
+                                                    self.arm_lower_limits, self.arm_upper_limits, self.arm_joint_ranges,
+                                                    maxNumIterations=100,
+                                                    residualThreshold=1e-4)
+        # print("IK求解结果关节角度: ", joint_poses)
         for i, joint_id in enumerate(self.arm_controllable_joints):
             p.setJointMotorControl2(self._id, joint_id, p.POSITION_CONTROL, joint_poses[i],
                                     force=self.joints[joint_id].maxForce, maxVelocity=self.joints[joint_id].maxVelocity)
+    def move_hand_to_pose(self, pos, orn):
+        """通过设定hand位姿来控制机器人末端执行器的位姿
+        
+        Args:
+            pos: hand的目标位置 [x, y, z]
+            orn: hand的目标朝向，四元数 [x, y, z, w]
+            
+        Note:
+            hand位置是末端执行器沿着x轴向前平移18cm得到的
+        """
+        # 将四元数转换为旋转矩阵
+        rot_matrix = np.array(p.getMatrixFromQuaternion(orn)).reshape(3, 3)
+        
+        # 计算x轴方向的单位向量
+        x_axis = rot_matrix[:, 0]  # 旋转矩阵的第一列是x轴方向
+        
+        # 计算末端执行器的位置：从hand位置沿着-x轴方向平移18cm
+        ee_pos = np.array(pos) - 0.18 * x_axis
+        
+        # 末端执行器的朝向与hand相同
+        ee_orn = orn
+        
+        # 调用move_pose函数移动末端执行器
+        print("目标末端执行器位姿: ", ee_pos, ee_orn)
+        self.move_pose(ee_pos.tolist(), ee_orn)
+        print("执行了末端执行器位姿动作", self.get_ee_pos())
 
     def move_gripper(self, open_length):
         """控制 Robotiq 140 夹爪的开合

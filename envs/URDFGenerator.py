@@ -160,12 +160,13 @@ class URDFGenerator:
         
         return collision_mesh
 
-    def save_dense_point_cloud(self, prefix='dense'):
+    def save_dense_point_cloud(self, prefix='dense', save_ply=False, color=None):
         """保存密集点云数据
         
         Args:
-            voxel_size: 体素大小（米）。如果为None，则根据物体尺寸自动计算
             prefix: 文件名前缀
+            save_ply: 是否保存为PLY格式（包含颜色信息）
+            color: 点云颜色，可以是RGB元组(r,g,b)或None（使用默认颜色）
             
         Returns:
             dict: 保存的文件路径信息
@@ -181,9 +182,62 @@ class URDFGenerator:
         # 构建文件路径
         points_path = os.path.join(self.output_dir, f"{prefix}_points.npy")
         metadata_path = os.path.join(self.output_dir, f"{prefix}_metadata.json")
+        ply_path = os.path.join(self.output_dir, f"{prefix}_points.ply")
         
-        # 保存点云数据
+        # 保存点云数据（NPY格式）
         np.save(points_path, points)
+        
+        # 如果需要保存为PLY格式（带颜色信息）
+        result_files = {
+            'points_path': points_path,
+            'metadata_path': metadata_path
+        }
+        
+        if save_ply:
+            # 创建带颜色的点云
+            import open3d as o3d
+            pcd = o3d.geometry.PointCloud()
+            pcd.points = o3d.utility.Vector3dVector(points)
+            
+            # 设置颜色
+            num_points = len(points)
+            if color is None:
+                # 默认使用物体的颜色（如果有）或浅灰色
+                if hasattr(self.mesh, 'visual') and hasattr(self.mesh.visual, 'to_color'):
+                    # 从mesh获取颜色
+                    try:
+                        mesh_color = self.mesh.visual.to_color()
+                        # 尝试不同的属性获取颜色
+                        if hasattr(mesh_color, 'rgba'):
+                            colors = np.tile(mesh_color.rgba[:3], (num_points, 1))
+                        elif hasattr(mesh_color, 'vertex_colors') and mesh_color.vertex_colors.shape[0] > 0:
+                            # 使用第一个顶点颜色
+                            colors = np.tile(mesh_color.vertex_colors[0][:3], (num_points, 1))
+                        elif hasattr(mesh_color, 'face_colors') and mesh_color.face_colors.shape[0] > 0:
+                            # 使用第一个面颜色
+                            colors = np.tile(mesh_color.face_colors[0][:3], (num_points, 1))
+                        else:
+                            # 默认浅灰色
+                            colors = np.tile(np.array([0.8, 0.8, 0.8]), (num_points, 1))
+                    except Exception as e:
+                        print(f"获取mesh颜色时出错: {e}")
+                        # 默认浅灰色
+                        colors = np.tile(np.array([0.8, 0.8, 0.8]), (num_points, 1))
+                else:
+                    # 默认浅灰色
+                    colors = np.tile(np.array([0.8, 0.8, 0.8]), (num_points, 1))
+            else:
+                # 使用指定的颜色
+                colors = np.tile(np.array(color), (num_points, 1))
+                
+            # 确保颜色值在0.0-1.0范围内
+            colors = np.clip(colors, 0.0, 1.0)
+            
+            pcd.colors = o3d.utility.Vector3dVector(colors)
+            
+            # 保存为PLY格式
+            o3d.io.write_point_cloud(ply_path, pcd)
+            result_files['ply_path'] = ply_path
         
         # 保存元数据
         metadata = {
@@ -200,19 +254,15 @@ class URDFGenerator:
                 'points_per_area': float(len(points) / self.mesh.area)
             },
             'files': {
-                'points': os.path.basename(points_path)
+                'points': os.path.basename(points_path),
+                'ply': os.path.basename(ply_path) if save_ply else None
             }
         }
         
         with open(metadata_path, 'w') as f:
             json.dump(metadata, f, indent=4)
         
-        # 删除多余的print
-        
-        return {
-            'points_path': points_path,
-            'metadata_path': metadata_path
-        }
+        return result_files
     
     def generate_urdf(self):
         """
@@ -274,20 +324,85 @@ class URDFGenerator:
         with open(self.urdf_file, 'w') as f:
             f.write(urdf_content)
         
-        # 保存详细的模型信息
-        info_path = os.path.join(self.output_dir, "object_info.json")
+        # 不再保存完整的mesh_info，因为文件太大
+        # 如果需要保存一些关键信息，可以保存一个简化版本
+        simplified_info = {
+            'basic_info': mesh_info['basic_info'],
+            'inertial_info': mesh_info['inertial_info'],
+            'topology_info': mesh_info['topology_info'],
+            'convex_hull_info': mesh_info['convex_hull_info']
+        }
+        
+        # 保存简化版的模型信息
+        info_path = os.path.join(self.output_dir, "object_info_simplified.json")
         with open(info_path, 'w') as f:
-            json.dump(mesh_info, f, indent=4)
+            json.dump(simplified_info, f, indent=4)
         
-        # 同时保存密集点云数据
-        self.save_dense_point_cloud()
-        # # 保存表面点云和法向量
-        # points_path = os.path.join(self.output_dir, "object_surface_points.npy")
-        # normals_path = os.path.join(self.output_dir, "object_surface_normals.npy")
-        # np.save(points_path, mesh_info['surface_info']['points'])
-        # np.save(normals_path, mesh_info['surface_info']['normals'])
+        # 同时保存密集点云数据（同时保存NPY和PLY格式）
+        # 如果mesh有颜色信息，使用mesh颜色；否则使用默认灰色
+        mesh_color = None
+        if hasattr(mesh, 'visual') and hasattr(mesh.visual, 'to_color'):
+            try:
+                mesh_color_obj = mesh.visual.to_color()
+                # 尝试不同的属性获取颜色
+                if hasattr(mesh_color_obj, 'rgba'):
+                    mesh_color = mesh_color_obj.rgba[:3]  # 只取RGB部分
+                elif hasattr(mesh_color_obj, 'vertex_colors') and mesh_color_obj.vertex_colors.shape[0] > 0:
+                    # 使用第一个顶点颜色
+                    mesh_color = mesh_color_obj.vertex_colors[0][:3]
+                elif hasattr(mesh_color_obj, 'face_colors') and mesh_color_obj.face_colors.shape[0] > 0:
+                    # 使用第一个面颜色
+                    mesh_color = mesh_color_obj.face_colors[0][:3]
+                else:
+                    # 默认浅灰色
+                    mesh_color = np.array([0.8, 0.8, 0.8])
+            except Exception as e:
+                print(f"获取mesh颜色时出错: {e}")
+                # 如果获取颜色失败，使用默认颜色
+                mesh_color = np.array([0.8, 0.8, 0.8])
         
-        # 删除多余的print
+        # 保存带颜色的PLY格式点云
+        self.save_dense_point_cloud(prefix='dense', save_ply=True, color=mesh_color)
+        
+        # 保存表面点云和法向量（也保存为PLY格式）
+        if 'surface_info' in mesh_info and 'points' in mesh_info['surface_info']:
+            # 从mesh_info中获取表面点云数据
+            surface_points = np.array(mesh_info['surface_info']['points'])
+            
+            # 保存为NPY格式
+            points_path = os.path.join(self.output_dir, "object_surface_points.npy")
+            np.save(points_path, surface_points)
+            
+            # 如果有法向量信息，也保存
+            if 'normals' in mesh_info['surface_info']:
+                normals_path = os.path.join(self.output_dir, "object_surface_normals.npy")
+                np.save(normals_path, mesh_info['surface_info']['normals'])
+            
+            # 保存为PLY格式（带颜色）
+            try:
+                import open3d as o3d
+                surface_pcd = o3d.geometry.PointCloud()
+                surface_pcd.points = o3d.utility.Vector3dVector(surface_points)
+                
+                # 设置颜色（与上面相同的逻辑）
+                num_points = len(surface_points)
+                if mesh_color is not None:
+                    colors = np.tile(np.array(mesh_color), (num_points, 1))
+                else:
+                    colors = np.tile(np.array([0.8, 0.8, 0.8]), (num_points, 1))
+                
+                # 确保颜色值在0.0-1.0范围内
+                colors = np.clip(colors, 0.0, 1.0)
+                
+                surface_pcd.colors = o3d.utility.Vector3dVector(colors)
+                
+                # 保存为PLY格式
+                surface_ply_path = os.path.join(self.output_dir, "object_surface_points.ply")
+                o3d.io.write_point_cloud(surface_ply_path, surface_pcd)
+            except ImportError:
+                print("警告：未安装open3d库，无法保存PLY格式点云")
+            except Exception as e:
+                print(f"保存PLY格式表面点云时出错：{e}")
         
         return self.urdf_file
 
@@ -296,10 +411,18 @@ class URDFGenerator:
         Returns:
             dict: 模型信息字典
         """
+        # 首先尝试读取简化版信息文件
+        simplified_info_path = os.path.join(self.output_dir, "object_info_simplified.json")
+        if os.path.exists(simplified_info_path):
+            with open(simplified_info_path, 'r') as f:
+                return json.load(f)
+        
+        # 兼容旧版本，如果简化版不存在，尝试读取完整版
         info_path = os.path.join(self.output_dir, "object_info.json")
         if os.path.exists(info_path):
             with open(info_path, 'r') as f:
                 return json.load(f)
+        
         return None
     
     def verify_coordinate_systems(self):

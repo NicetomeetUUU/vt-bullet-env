@@ -52,6 +52,9 @@ class VTGraspRefine:
     def _update_coordinate_frames(self):
         """更新所有坐标系的可视化"""
         # 更新末端执行器坐标系
+        if not self.vis:
+            return
+        
         ee_pos, ee_orn = self.robot.get_ee_pos()
         self.frame_visualizer.visualize_frame(ee_pos, ee_orn, 'end_effector')
         
@@ -97,10 +100,10 @@ class VTGraspRefine:
         for action in actions:
             # 执行动作
             action_wrapper.execute_action(action)
-            
-            # 执行物理仪真和渲染
-            for _ in range(steps):  # 执行1秒的仿真步骤
-                self.step_simulation()
+            if self.vis:
+                # 执行物理仪真和渲染
+                for _ in range(steps):  # 执行1秒的仿真步骤
+                    self.step_simulation()
         self._update_coordinate_frames()
 
     def get_ee_pos(self):

@@ -11,6 +11,7 @@ def visualize_point_cloud(points_file, normals_file=None, info_file=None):
         info_file: 模型信息文件路径（.json格式，可选）
     """
     # 加载点云数据
+    
     points = np.load(points_file)
     
     # 创建点云对象

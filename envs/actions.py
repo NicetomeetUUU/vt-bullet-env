@@ -43,7 +43,7 @@ class ActionWrapper:
             self.robot.move_gripper(action.gripper.width)
         elif isinstance(action, PoseAction):
             # 执行末端位姿控制
-            self.robot.move_pose(action.position, action.orientation)
+            self.robot.move_hand_to_pose(action.position, action.orientation)
             # 控制夹爪
             self.robot.move_gripper(action.gripper.width)
         elif isinstance(action, GripperAction):

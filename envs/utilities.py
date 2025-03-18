@@ -3,8 +3,8 @@ import glob
 from collections import namedtuple
 from attrdict import AttrDict
 import cv2
-from scipy import ndimage
 import numpy as np
+import open3d as o3d
 import os
 import xml.etree.ElementTree as ET
 
@@ -20,22 +20,22 @@ class ModelLoader:
         self.urdf_file = urdf_file
         self.obj_info = None
 
-    def _get_urdf_offset(self):
-        """从 URDF 文件中读取 origin 偏移
-        Args:
-            urdf_file: URDF文件路径
-        Returns:
-            tuple: (x, y, z) 偏移量
-        """
-        tree = ET.parse(self.urdf_file)
-        root = tree.getroot()
+    # def _get_urdf_offset(self):
+    #     """从 URDF 文件中读取 origin 偏移
+    #     Args:
+    #         urdf_file: URDF文件路径
+    #     Returns:
+    #         tuple: (x, y, z) 偏移量
+    #     """
+    #     tree = ET.parse(self.urdf_file)
+    #     root = tree.getroot()
         
-        # 获取第一个 link 中的 visual/origin 的 xyz
-        origin = root.find('.//visual/origin')
-        if origin is not None and 'xyz' in origin.attrib:
-            offset_x, offset_y, offset_z = map(float, origin.get('xyz').split())
-            return (offset_x, offset_y, offset_z)
-        return (0, 0, 0)
+    #     # 获取第一个 link 中的 visual/origin 的 xyz
+    #     origin = root.find('.//visual/origin')
+    #     if origin is not None and 'xyz' in origin.attrib:
+    #         offset_x, offset_y, offset_z = map(float, origin.get('xyz').split())
+    #         return (offset_x, offset_y, offset_z)
+    #     return (0, 0, 0)
     
     def load_object(self, position=(0,0,0), orientation=(0, 0, 0, 1), scale=1.0, name=None):
         """添加一个物体到环境中
@@ -51,14 +51,19 @@ class ModelLoader:
             print(f"[警告] 物体信息不为空")
             self.remove_object()
         # 计算补偿后的位置
-        offset = self._get_urdf_offset()
+        # offset = self._get_urdf_offset()
+        # final_position = (
+        #     position[0] + offset[0],  # 添加x轴偏移
+        #     position[1] - offset[1],
+        #     position[2] - offset[2]  # 添加一个高度偏移确保物体不会穿透地面
+        # )
         final_position = (
-            position[0] + offset[0],  # 添加x轴偏移
-            position[1] - offset[1],
-            position[2] - offset[2] + 0.3  # 添加一个高度偏移确保物体不会穿透地面
+            position[0],  # 添加x轴偏移
+            position[1],
+            position[2] + 0.2  # 添加一个高度偏移确保物体不会穿透地面
         )
         
-        print(f"[加载物体] 最终位置: {final_position}")
+        # print(f"[加载物体] 最终位置: {final_position}")
         
         # 加载物体
         obj_id = p.loadURDF(self.urdf_file,
@@ -374,4 +379,48 @@ class Camera:
         
         return rgb, depth, seg
 
+    def get_point_cloud_world(self, max_depth=1.0, min_depth=0.01):
+        # based on https://stackoverflow.com/questions/59128880/getting-world-coordinates-from-opengl-depth-buffer
 
+        width = self.width
+        height = self.height
+        view_matrix, proj_matrix = self._get_camera_matrices()
+        # get a depth image
+        # "infinite" depths will have a value close to 1
+        image_arr = p.getCameraImage(width=width, height=height, viewMatrix=view_matrix, projectionMatrix=proj_matrix)
+        depth = image_arr[3]
+        rgb = image_arr[2][:, :, :3]
+
+        # create a 4x4 transform matrix that goes from pixel coordinates (and depth values) to world coordinates
+        proj_matrix = np.asarray(proj_matrix).reshape([4, 4], order="F")
+        view_matrix = np.asarray(view_matrix).reshape([4, 4], order="F")
+        tran_pix_world = np.linalg.inv(np.matmul(proj_matrix, view_matrix))
+
+        # create a grid with pixel coordinates and depth values
+        y, x = np.mgrid[-1:1:2 / height, -1:1:2 / width]
+        y *= -1.
+        x, y, z = x.reshape(-1), y.reshape(-1), depth.reshape(-1)
+        h = np.ones_like(z)
+
+        pixels = np.stack([x, y, z, h], axis=1)
+        
+        pixels[:, 2] = 2 * pixels[:, 2] - 1
+
+        # turn pixels to world coordinates
+        points = np.matmul(tran_pix_world, pixels.T).T
+        points /= points[:, 3: 4]
+        points = points[:, :3]
+
+        rgb_flat = rgb.reshape(-1, 3)
+
+        # pcd = o3d.geometry.PointCloud()
+        # pcd.points = o3d.utility.Vector3dVector(points)
+        # pcd.colors = o3d.utility.Vector3dVector(rgb_flat.astype(np.float64)/255.0)
+
+        filtered_points = points[(points[:, 2] >= min_depth) & (points[:, 2] <= max_depth)]
+        filtered_colors = rgb_flat[(points[:, 2] >= min_depth) & (points[:, 2] <= max_depth)]
+
+        pcd = o3d.geometry.PointCloud()
+        pcd.points = o3d.utility.Vector3dVector(filtered_points)
+        pcd.colors = o3d.utility.Vector3dVector(filtered_colors.astype(np.float64)/255.0)
+        return pcd
