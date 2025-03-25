@@ -1,15 +1,16 @@
 import os
 import numpy as np
 import pybullet as p
+import pybulletX as px
 import tacto
 import open3d as o3d
-import math
 import json
 from env import VTGraspRefine
 from robot import UR5Robotiq140
 from utilities import Camera, ModelLoader
 from actions import PoseAction, GripperCommand, GripperAction, JointAction
 from scipy.spatial.transform import Rotation as R
+import cv2
 
 def get_transform(pos, orn):
     """将位置 (pos) 和旋转 (orn) 转换为齐次变换矩阵"""
@@ -44,7 +45,7 @@ class TactileDataCollector:
         self.save_dir = save_dir
         self.visualize_gui = visualize_gui
         # 初始化机器人和环境
-        robot = UR5Robotiq140((0, 0, 0.2), (0, 0, 0))  # 绕z轴旋转90度
+        robot = UR5Robotiq140((0, 0, 0), (0, 0, 0))  # 绕z轴旋转90度
         self.env = VTGraspRefine(robot, vis=visualize_gui)
         os.makedirs(save_dir, exist_ok=True)
 
@@ -52,10 +53,10 @@ class TactileDataCollector:
         
         # 创建固定在世界坐标系中的相机
         camera_height = 0.5  # 相机的高度
-        camera_position = [0.5,   # x坐标（正上方）
-                         0,    # y坐标（正上方）
+        camera_position = [0,   # x坐标（正上方）
+                         -0.5,    # y坐标（正上方）
                          camera_height]  # z坐标（高度）
-        camera_target = [0.5, 0, 0]  # 相机观察的目标点（世界坐标系原点）
+        camera_target = [0, -0.5, 0]  # 相机观察的目标点（世界坐标系原点）
         up_vector = [0, 1, 0]  # 相机向上的方向（y轴正方向）
         
         camera = Camera(
@@ -80,8 +81,7 @@ class TactileDataCollector:
         r = R.from_matrix(pointcloud_base_orn_matrix)
         self.pointcloud_base_orn = r.as_quat()  # 返回[x, y, z, w]格式的四元数
         self.pointcloud_base_pos = camera_pos
-        print("展示信息camera:", camera_pos, camera_orn)
-        print("展示信息pointcloud_base:", self.pointcloud_base_pos, self.pointcloud_base_orn)
+        
         # 设置环境的相机
         self.env.camera = camera
         
@@ -99,55 +99,55 @@ class TactileDataCollector:
         # 渲染相机图像
         self.env.camera.shot()
         # 渲染触觉传感器数据
-        tactile_rgb, tactile_depth = self.digits.render()
+        tactile_rgb, tactile_depth, _, _ = self.digits.render()
         self.digits.updateGUI(tactile_rgb, tactile_depth)
         # 执行几步仿真使显示更稳定
         for _ in range(10):
             self.env.step_simulation()
         
         
-    def load_object(self, object_path, position=(0, 0, 0), orientation=(0, 0, 0, 1)):
-        """加载物体
+    def load_object(self, object_cfg):
+        '''
+        加载物体到世界与digit渲染中
         Args:
-            object_path (str): 物体的路径
-        """
-        obj_loader = ModelLoader(object_path)
-        obj_info = obj_loader.load_object(position=position, orientation=orientation)
-        obj_id = obj_info['id']
-        self.obj_loaders[obj_id] = obj_loader
-        for _ in range(240):
-            self.env.step_simulation()
+            object_cfg (dict): 物体配置字典
+        '''
+        obj = px.Body(**object_cfg)
+        self.digits.add_body(obj)
+        obj_id = obj.id
         return obj_id
-
-    def remove_object(self, obj_id):
-        if obj_id in self.obj_loaders:
-            obj_loader = self.obj_loaders[obj_id]
-            success = obj_loader.remove_object()
-            if not success:
-                raise Exception(f"移除物体失败: {obj_id}")
-            del self.obj_loaders[obj_id]
-            for _ in range(100):
-                self.env.step_simulation()
-            return True
-        return False
-    
-    def remove_all_objects(self):
-        """移除所有物体"""
-        # 先获取所有物体ID的列表
-        obj_ids = list(self.obj_loaders.keys())
-        # 遍历列表删除物体
-        for obj_id in obj_ids:
-            self.remove_object(obj_id)
         
     def collect_tactile_data(self):
-        """采集当前时刻的触觉数据"""
-        rgb_list, depth_list = self.digits.render()
-        if (self.visualize_gui):
-            self.digits.updateGUI(rgb_list, depth_list)
-            # 增加物理仿真步数和延时使渲染更流畅
+        """
+        采集当前时刻的触觉数据
+        
+        Returns:
+            tuple: (rgb_list, depth_list, pointcloud_list)
+                - rgb_list: RGB图像列表
+                - depth_list: 深度图列表
+                - pointcloud_list: 相机坐标系下的点云列表
+        """
+        # 渲染触觉传感器数据
+        rgb_list, depth_list, pointcloud_list, camera_poses = self.digits.render()
+        # 更新GUI
+        self.digits.updateGUI(rgb_list, depth_list)
+        if len(rgb_list) > 0:
+            cv2.imshow('RGB', rgb_list[0])
+            cv2.waitKey(1)
+            
+        # 执行仿真步骤
         for _ in range(120):
             self.env.step_simulation()
-        return rgb_list, depth_list
+        
+        return rgb_list, depth_list, pointcloud_list, camera_poses
+
+    def move_to_joint_poses(self, joint_poses):
+        """控制机器人关节移动到目标位姿
+        Args:
+            joint_poses (list): 关节位姿列表
+        """
+        action = JointAction(joint_poses, gripper=GripperCommand(width=0.10))
+        self.env.step_actions(action, 240)
 
     def move_to_grasp_pose(self, target_pos, target_orn, gripper_width=0.10):
         """控制机器人末端移动到目标抓取位姿
@@ -157,29 +157,13 @@ class TactileDataCollector:
             target_orn (tuple): 目标姿态四元数 (x, y, z, w)
             gripper_width (float): 夹爪开度，默认0.04表示完全打开
         """
-        print(f"目标位置: {target_pos}, 目标朝向: {target_orn}")
         
-        # # 创建位姿动作
-        # pre_joint_positions = [-3.14, -1.5446774605904932, 1.343946009733127, -1.3708613585093699, -1.5707970583733368, 0.0009377758247187636]
-        # pre_action = JointAction(joint_positions=pre_joint_positions, gripper=GripperCommand(width=0.10))
-        # self.env.step_actions(pre_action, 120)
-        # 将四元数转换为旋转矩阵
-        rot_matrix = np.array(p.getMatrixFromQuaternion(target_orn)).reshape(3, 3)
-        
-        # 计算x轴方向的单位向量
-        x_axis = rot_matrix[:, 0]  # 旋转矩阵的第一列是x轴方向
-        
-        # 计算末端执行器的位置：从hand位置沿着-x轴方向平移18cm
-        ee_pos = np.array(target_pos) - 0.18 * x_axis
-        
-        # 末端执行器的朝向与hand相同
-        ee_orn = target_orn
+        # 创建夹爪动作
         action = PoseAction(
-            position=ee_pos.tolist(),
-            orientation=ee_orn,
+            position=target_pos,
+            orientation=target_orn,
             gripper=GripperCommand(width=gripper_width)
         )
-        
         # 执行动作并添加延时使运动更流畅
         self.env.step_actions(action, 240)
 
@@ -196,89 +180,70 @@ class TactileDataCollector:
         # 执行动作并添加延时使运动更流畅
         self.env.step_actions(action, 120)
         
-    def execute_grasp_from_file(self, grasp_poses_file, obj_id=None, visualize=True):
-        """从文件中读取抓取位姿并执行抓取
-        
+    def transform_to_world_frame(self,position, rotation_matrix):
+        """将抓取位姿从点云坐标系转换到世界坐标系
+
         Args:
-            grasp_poses_file (str): 包含抓取位姿的JSON文件路径
-            obj_id (int): 要抓取的物体ID，如果提供则会将物体固定
-            visualize (bool): 是否可视化触觉传感器数据
-            
+            position (np.ndarray): 抓取位姿的位置
+            rotation_matrix (np.ndarray): 抓取位姿的旋转矩阵
+        
         Returns:
-            list: 所有传感器采集到的RGB和深度图像列表
+            tuple: 转换后的抓取位姿位置和旋转矩阵
         """
-        
-        # 读取抓取位姿文件
-        try:
-            with open(grasp_poses_file, 'r') as f:
-                grasp_poses = json.load(f)
-            print(f"成功读取{len(grasp_poses)}个抓取位姿")
-        except Exception as e:
-            print(f"读取抓取位姿文件时出错: {str(e)}")
-            return []
-        
-        all_sensor_data = []
-        
+        pointcloud_base_pos = np.array(self.pointcloud_base_pos)
+        pointcloud_base_orn = np.array(self.pointcloud_base_orn)
+        pointcloud_base_matrix = R.from_quat(pointcloud_base_orn)# 创建点云坐标系到世界坐标系的变换矩阵
+        # 1. 创建旋转部分
+        R_pointcloud_to_world = pointcloud_base_matrix.as_matrix()
+        # 2. 创建平移部分
+        t_pointcloud_to_world = pointcloud_base_pos
+        # 3. 将抓取位姿从点云坐标系转换到世界坐标系
+        # 3.1 转换位置
+        position = R_pointcloud_to_world @ np.array(position) + t_pointcloud_to_world
+        # 3.2 转换旋转矩阵
+        rotation_matrix = R_pointcloud_to_world @ rotation_matrix
+        return position, rotation_matrix
+
+    def move_to_pre_grasp_pose(self, grasp):
+        grasp_position = grasp['translation']
+        grasp_rotation_matrix = np.array(grasp['rotation'])
+        grasp_gripper_width = grasp['width']
+        grasp_position, grasp_rotation_matrix = self.transform_to_world_frame(grasp_position, grasp_rotation_matrix)
+        r = R.from_matrix(grasp_rotation_matrix)
+        grasp_quaternion = r.as_quat()  # 返回[x, y, z, w]格式的四元数
+        rot_matrix = np.array(p.getMatrixFromQuaternion(grasp_quaternion)).reshape(3, 3)
+        x_axis = rot_matrix[:, 0]  # 旋转矩阵的第一列是x轴方向
+        pre_grasp_position = np.array(grasp_position) - 0.06 * x_axis
+        self.move_to_grasp_pose(pre_grasp_position, grasp_quaternion, grasp_gripper_width)
+        return grasp_position, grasp_quaternion, grasp_gripper_width
+
+    def save_tactile_data(self):
+        pass
+
+    def execute_grasps(self, grasp_poses):
+        """从文件中读取抓取位姿并执行抓取
+
+        Args:
+            grasp_poses (list): 包含抓取位姿的列表
+        Returns:
+            None
+        """
         # 遍历所有抓取位姿
         for i, grasp in enumerate(grasp_poses):
-            print(f"\n执行第{i+1}个抓取位姿，得分: {grasp['score']:.4f}")
-            
-            # 提取位置和旋转矩阵（相机坐标系下）
-            grasp_position = grasp['translation']
-            grasp_rotation_matrix = np.array(grasp['rotation'])
-            print(f"相机坐标系下抓取位姿: {grasp_position}, {grasp_rotation_matrix}")
-            
-            pointcloud_base_pos = np.array(self.pointcloud_base_pos)
-            pointcloud_base_orn = np.array(self.pointcloud_base_orn)
-            pointcloud_base_matrix = R.from_quat(pointcloud_base_orn)# 创建点云坐标系到世界坐标系的变换矩阵
-            # 1. 创建旋转部分
-            R_pointcloud_to_world = pointcloud_base_matrix.as_matrix()
-            
-            # 2. 创建平移部分
-            t_pointcloud_to_world = pointcloud_base_pos
-            
-            # 3. 将抓取位姿从点云坐标系转换到世界坐标系
-            # 3.1 转换位置
-            position = R_pointcloud_to_world @ np.array(grasp_position) + t_pointcloud_to_world
-            
-            # 3.2 转换旋转矩阵
-            rotation_matrix = R_pointcloud_to_world @ grasp_rotation_matrix
-            
-            # 3.3 将旋转矩阵转换为四元数
-            r = R.from_matrix(rotation_matrix)
-            quaternion = r.as_quat()  # 返回[x, y, z, w]格式的四元数
-            
-            print(f"抓取位姿: {position}, {quaternion}")
+            print(f"\n执行第{i+1}个抓取位姿，得分: {grasp['score']:.4f}, 宽度: {grasp['width']:.4f}")
+            grasp_position, grasp_quaternion, grasp_gripper_width = self.move_to_pre_grasp_pose(grasp)
             
             # 打开夹爪准备抓取
-            self.move_to_grasp_pose(position, quaternion, 0.10)
-            # 采集抓取前的传感器数据
-            rgb_before, depth_before = self.collect_tactile_data()
-            
-            # 闭合夹爪完成抓取
-            self.control_gripper(gripper_width=0.0)
-            input("按回车继续...")
-            
-            # 采集抓取后的传感器数据
-            rgb_after, depth_after = self.collect_tactile_data()
-            
-            # 保存传感器数据
-            sensor_data = {
-                'grasp_id': i,
-                'grasp_score': grasp['score'],
-                'position': position,
-                'orientation': quaternion.tolist(),
-                'rgb_before': rgb_before,
-                'depth_before': depth_before,
-                'rgb_after': rgb_after,
-                'depth_after': depth_after
-            }
-            all_sensor_data.append(sensor_data)
-            
-            # 重置夹爪为打开状态
-            self.control_gripper(gripper_width=0.08)
-        
-        return all_sensor_data
+            self.move_to_grasp_pose(grasp_position, grasp_quaternion, 0.10)
+
+            # 夹取
+            self.control_gripper(gripper_width=0.01)
+            rgb_list, depth_list, pointcloud_list, camera_poses = self.collect_tactile_data()
+
+            self.save_tactile_data()
+            # 重置位置
+            # self.reset()
+        return pointcloud_list, camera_poses
     
     def reset(self):
         """重置环境"""
@@ -385,8 +350,6 @@ class TactileDataCollector:
             max_bound=aabb_max + margin
         )
         cropped_pcd = pcd.crop(bbox)
-        
-        print(f"已截取AABB边界框内的点云，原点数: {len(np.asarray(pcd.points))}, 截取后点数: {len(np.asarray(cropped_pcd.points))}")
         return cropped_pcd
         
     def transform_to_object_frame(self, pcd, obj_id):
@@ -432,10 +395,6 @@ class TactileDataCollector:
             # 关闭GUI窗口
             if hasattr(self, 'digits') and hasattr(self.digits, '_gui'):
                 self.digits._gui.close()
-            
-            # 断开PyBullet连接
-            if hasattr(self, 'env') and self.env.physicsClient is not None:
-                p.disconnect(self.env.physicsClient)
         except Exception as e:
             print(f"Error during cleanup: {e}")
 

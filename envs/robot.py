@@ -44,6 +44,8 @@ class RobotBase(object):
         self.arm_num_dofs = None  # 机械臂自由度
         self.gripper_range = [0, 0.085]  # 默认夹爱器范围
         self._physics_client = None  # 物理引擎客户端
+        self.arm_rest_poses = [-1.5690622952052096, -1.5446774605904932, 1.343946009733127, -1.3708613585093699,
+                               -1.5707970583733368, 0.0009377758247187636]
 
     def load(self):
         self.__init_robot__()
@@ -84,7 +86,8 @@ class RobotBase(object):
 
         self.arm_lower_limits = [info.lowerLimit for info in self.joints if info.controllable][:self.arm_num_dofs]
         self.arm_upper_limits = [info.upperLimit for info in self.joints if info.controllable][:self.arm_num_dofs]
-        self.arm_joint_ranges = [info.upperLimit - info.lowerLimit for info in self.joints if info.controllable][:self.arm_num_dofs]
+        # self.arm_joint_ranges = [info.upperLimit - info.lowerLimit for info in self.joints if info.controllable][:self.arm_num_dofs]
+        self.arm_joint_ranges = [info.upperLimit for info in self.joints if info.controllable][:self.arm_num_dofs]
 
     def __init_robot__(self):
         raise NotImplementedError
@@ -133,14 +136,8 @@ class RobotBase(object):
         return position, orientation
 
     def move_ee(self, action, control_method):
-        assert control_method in ('joint', 'end', 'q_end')
-        if control_method == 'q_end':
-            pos, orn = self.get_ee_pos()
-            new_pos = (pos[0], pos[1], pos[2] - 0.03)
-            joint_poses = p.calculateInverseKinematics(self._id, self.eef_id, new_pos, orn,
-                                                       self.arm_lower_limits, self.arm_upper_limits, self.arm_joint_ranges, self.arm_rest_poses,
-                                                       maxNumIterations=20)
-        elif control_method == 'end':
+        assert control_method in ('joint', 'end')
+        if control_method == 'end':
             x, y, z, roll, pitch, yaw = action
             pos = (x, y, z)
             orn = p.getQuaternionFromEuler((roll, pitch, yaw))
@@ -188,8 +185,6 @@ class UR5Robotiq85(RobotBase):
     def __init_robot__(self):
         self.eef_id = 7
         self.arm_num_dofs = 6
-        self.arm_rest_poses = [-1.5690622952052096, -1.5446774605904932, 1.343946009733127, -1.3708613585093699,
-                               -1.5707970583733368, 0.0009377758247187636]
         self._id = p.loadURDF('./urdf/ur5_robotiq_85.urdf', self.base_pos, self.base_ori,
                              useFixedBase=True, flags=p.URDF_ENABLE_CACHED_GRAPHICS_SHAPES)
         self._physics_client = px.current_client()
@@ -274,20 +269,21 @@ class UR5Robotiq140(UR5Robotiq85):
     #         p.setJointMotorControl2(self._id, joint_id, p.POSITION_CONTROL, joint_poses[i],
     #                                 force=self.joints[joint_id].maxForce, maxVelocity=self.joints[joint_id].maxVelocity)
 
+    def get_joint_poses(self):
+        return [p.getJointState(self._id, joint_id)[0] for joint_id in self.arm_controllable_joints]
+
     def move_pose(self, pos, orn):
-        # print("IK求解前的目标位姿: ", pos, orn)
-        print("arm_upper_limits: ", self.arm_upper_limits)
-        print("arm_lower_limits: ", self.arm_lower_limits)
-        print("arm_joint_ranges: ", self.arm_joint_ranges)
-        print("arm_rest_poses: ", self.arm_rest_poses)
+        # 获取当前关节角度作为IK求解的初始姿势
         joint_poses = p.calculateInverseKinematics(self._id, self.eef_id, pos, orn,
-                                                    self.arm_lower_limits, self.arm_upper_limits, self.arm_joint_ranges,
-                                                    maxNumIterations=100,
-                                                    residualThreshold=1e-4)
-        # print("IK求解结果关节角度: ", joint_poses)
+                                                   self.arm_lower_limits, self.arm_upper_limits, self.arm_joint_ranges, self.arm_rest_poses,
+                                                   maxNumIterations=200, residualThreshold=1e-4)
+        
+        # 只取前arm_num_dofs个关节角度，因为IK求解可能返回更多的值
+        joint_poses = joint_poses[:self.arm_num_dofs]
         for i, joint_id in enumerate(self.arm_controllable_joints):
-            p.setJointMotorControl2(self._id, joint_id, p.POSITION_CONTROL, joint_poses[i],
+            p.setJointMotorControl2(self._id, joint_id, p.POSITION_CONTROL, joint_poses[i], 
                                     force=self.joints[joint_id].maxForce, maxVelocity=self.joints[joint_id].maxVelocity)
+
     def move_hand_to_pose(self, pos, orn):
         """通过设定hand位姿来控制机器人末端执行器的位姿
         
@@ -296,24 +292,21 @@ class UR5Robotiq140(UR5Robotiq85):
             orn: hand的目标朝向，四元数 [x, y, z, w]
             
         Note:
-            hand位置是末端执行器沿着x轴向前平移18cm得到的
+            hand位置是末端执行器沿着x轴向前平移21cm得到的
         """
         # 将四元数转换为旋转矩阵
         rot_matrix = np.array(p.getMatrixFromQuaternion(orn)).reshape(3, 3)
         
-        # 计算x轴方向的单位向量
+        # 计算x轴方向
         x_axis = rot_matrix[:, 0]  # 旋转矩阵的第一列是x轴方向
         
-        # 计算末端执行器的位置：从hand位置沿着-x轴方向平移18cm
-        ee_pos = np.array(pos) - 0.18 * x_axis
+        ee_pos = np.array(pos) - 0.175 * x_axis
         
         # 末端执行器的朝向与hand相同
         ee_orn = orn
         
         # 调用move_pose函数移动末端执行器
-        print("目标末端执行器位姿: ", ee_pos, ee_orn)
         self.move_pose(ee_pos.tolist(), ee_orn)
-        print("执行了末端执行器位姿动作", self.get_ee_pos())
 
     def move_gripper(self, open_length):
         """控制 Robotiq 140 夹爪的开合
@@ -321,14 +314,6 @@ class UR5Robotiq140(UR5Robotiq85):
             open_length: 夹爪开合距离，单位为米，范围[0, 0.140]
         """
         open_length = np.clip(open_length, *self.gripper_range)
-        
-        # Robotiq 140 的运动学参数
-        L1 = 0.140  # 指节长度
-        L2 = 0.160  # 指节到夹爪尖端的距离
-        
-        # 计算夹爪角度
-        # 当夹爪完全闭合时，角度为 0.8 弧度
-        # 当夹爪完全打开时，角度为 0 弧度
         open_angle = 0.8 * (1 - open_length / self.gripper_range[1])
         
         # 控制夹爪运动

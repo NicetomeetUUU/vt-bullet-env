@@ -159,6 +159,66 @@ class URDFGenerator:
             collision_mesh = collision_mesh.voxelized(pitch=voxel_size).fill().as_boxes().convex_hull
         
         return collision_mesh
+        
+    def _create_vhacd_collision_mesh(self, input_obj_path, output_obj_path):
+        """
+        使用PyBullet的VHACD算法创建高质量的碰撞网格
+        Args:
+            input_obj_path: 输入OBJ文件路径
+            output_obj_path: 输出VHACD碰撞体OBJ文件路径
+        Returns:
+            bool: 是否成功生成VHACD碰撞体
+        """
+        print(f"正在使用VHACD生成碰撞体: {os.path.basename(input_obj_path)} -> {os.path.basename(output_obj_path)}")
+        
+        # 设置VHACD参数
+        vhacd_params = {
+            "resolution": 2000000,         # 提高体素分辨率（原值：1000000）
+            "depth": 32,                   # 增加最大递归深度（原值：20）
+            "concavity": 0.0005,           # 降低最大允许凹度（新增参数，更精确）
+            "planeDownsampling": 4,        # 保持不变
+            "convexhullDownsampling": 4,   # 保持不变
+            "alpha": 0.04,                 # 略微降低（原值：0.05）
+            "beta": 0.04,                  # 略微降低（原值：0.05）
+            "gamma": 0.00025,              # 降低最小体积阈值（原值：0.00125）
+            "pca": 0,                      # 保持不变
+            "mode": 0,                     # 保持不变
+            "maxNumVerticesPerCH": 128,    # 增加每个凸包最大顶点数（原值：64）
+            "minVolumePerCH": 0.00001,     # 降低每个凸包最小体积（原值：0.0001）
+            "convexhullApproximation": 0   # 禁用凸包近似（新增参数，更精确）
+        }
+        try:
+            # 确保PyBullet已连接
+            if not p.isConnected():
+                client_id = p.connect(p.DIRECT)
+                disconnect_after = True
+            else:
+                disconnect_after = False
+                
+            # 执行VHACD算法
+            log_file = os.path.join(self.output_dir, "vhacd_log.txt")
+            p.vhacd(
+                input_obj_path,
+                output_obj_path,
+                log_file,  # fileNameLogging参数
+                **vhacd_params
+            )
+            
+            # 如果需要，断开连接
+            if disconnect_after:
+                p.disconnect(client_id)
+                
+            # 验证输出文件是否存在
+            if os.path.exists(output_obj_path):
+                print(f"VHACD碰撞体生成成功: {os.path.basename(output_obj_path)}")
+                return True
+            else:
+                print(f"警告: VHACD碰撞体生成失败，输出文件不存在: {output_obj_path}")
+                return False
+                
+        except Exception as e:
+            print(f"VHACD碰撞体生成失败: {e}")
+            return False
 
     def save_dense_point_cloud(self, prefix='dense', save_ply=False, color=None):
         """保存密集点云数据
@@ -264,9 +324,11 @@ class URDFGenerator:
         
         return result_files
     
-    def generate_urdf(self):
+    def generate_urdf(self, use_vhacd=True):
         """
         生成URDF文件和相关信息
+        Args:
+            use_vhacd: 是否使用VHACD算法生成碰撞体
         Returns:
             str: 生成的URDF文件路径
         """
@@ -274,18 +336,33 @@ class URDFGenerator:
         mesh = trimesh.load(self.obj_file)
         mesh_info = self._analyze_mesh(self.obj_file)
         
-        # 复制视觉模型并创建简化的碰撞模型
+        # 复制视觉模型并创建碰撞模型
         visual_file = os.path.join(self.output_dir, "object_visual.obj")
         collision_file = os.path.join(self.output_dir, "object_collision.obj")
+        vhacd_file = os.path.join(self.output_dir, "object_vhacd.obj")
         
-        # 加载并简化网格作为碰撞模型
-        mesh = trimesh.load(self.obj_file)
-        collision_mesh = self._create_simplified_collision_mesh(mesh)
-        
-        # 保存模型
+        # 保存视觉模型
         import shutil
         shutil.copy2(self.obj_file, visual_file)
-        collision_mesh.export(collision_file)
+        
+        # 根据选择的方法创建碰撞模型
+        if use_vhacd:
+            # 使用VHACD算法生成高质量碰撞体
+            vhacd_success = self._create_vhacd_collision_mesh(visual_file, vhacd_file)
+            if vhacd_success:
+                collision_filename = os.path.basename(vhacd_file)
+                print(f"使用VHACD碰撞体: {collision_filename}")
+            else:
+                # VHACD失败，回退到简化碰撞体
+                print("VHACD生成失败，回退到简化碰撞体")
+                collision_mesh = self._create_simplified_collision_mesh(mesh)
+                collision_mesh.export(collision_file)
+                collision_filename = os.path.basename(collision_file)
+        else:
+            # 使用简化的碰撞模型
+            collision_mesh = self._create_simplified_collision_mesh(mesh)
+            collision_mesh.export(collision_file)
+            collision_filename = os.path.basename(collision_file)
         
         # 设置物理参数
         mass = 1.0  # kg
@@ -309,7 +386,7 @@ class URDFGenerator:
         <collision>
             <origin xyz="{center[0]} {center[1]} {center[2]}" rpy="0 0 0"/>
             <geometry>
-                <mesh filename="{os.path.basename(collision_file)}" scale="1 1 1"/>
+                <mesh filename="{collision_filename}" scale="0.97 0.97 0.97"/>
             </geometry>
         </collision>
         <inertial>
@@ -478,7 +555,8 @@ def main():
                 voxel_size=voxel_size
             )
             
-            urdf_file = generator.generate_urdf()
+            # 使用VHACD生成碰撞体
+            urdf_file = generator.generate_urdf(use_vhacd=True)
             results['success'].append({
                 'id': model_id,
                 'urdf': urdf_file
@@ -509,6 +587,50 @@ def check_coordinate_systems(model_dir):
     print(f'是否一致：{is_consistent}')
     print(f'质心差异：{diff} 米')
 
+def generate_vhacd_for_model(model_id):
+    """为指定ID的模型生成VHACD碰撞体"""
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    model_dir = os.path.join(current_dir, f"../models/{model_id}")
+    
+    if not os.path.exists(model_dir):
+        print(f"错误：模型目录不存在 {model_dir}")
+        return False
+        
+    print(f"为模型 {model_id} 生成VHACD碰撞体...")
+    generator = URDFGenerator(
+        model_dir=model_dir,
+        output_dir=model_dir,
+        voxel_size=0.002
+    )
+    
+    # 使用VHACD生成碰撞体
+    urdf_file = generator.generate_urdf(use_vhacd=True)
+    print(f"URDF文件已更新: {urdf_file}")
+    return True
+
 if __name__ == "__main__":
-    main()
-    check_coordinate_systems("../models/000")
+    # import sys
+    from tqdm import tqdm  # 正确的导入方式
+    
+    # 选项一：处理所有模型
+    print("开始为所有模型生成VHACD碰撞体...")
+    for obj_idx in tqdm(range(0, 88)):
+        model_id = f"{obj_idx:03d}"
+        try:
+            generate_vhacd_for_model(model_id)
+        except Exception as e:
+            print(f"处理模型 {model_id} 时出错: {e}")
+            continue
+    
+    # 注释掉的命令行参数处理代码
+    # if len(sys.argv) > 1 and sys.argv[1] == "vhacd":
+    #     # 指定模型ID生成VHACD碰撞体
+    #     if len(sys.argv) > 2:
+    #         model_id = sys.argv[2]
+    #         generate_vhacd_for_model(model_id)
+    #     else:
+    #         print("请指定模型ID，例如: python URDFGenerator.py vhacd 003")
+    # else:
+    #     # 默认行为
+    #     main()
+    #     check_coordinate_systems("../models/000")

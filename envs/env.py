@@ -3,7 +3,7 @@ import time
 import numpy as np
 import pybullet as p
 import pybullet_data
-
+import pybulletX as px
 from utilities import ModelLoader, Camera, CoordinateFrameVisualizer
 from collections import namedtuple
 from tqdm import tqdm
@@ -28,9 +28,7 @@ class VTGraspRefine:
             self.p_bar = tqdm(ncols=0, disable=False)
         
         # 环境定义
-        self.physicsClient = p.connect(p.GUI if self.vis else p.DIRECT)
-        p.setAdditionalSearchPath(pybullet_data.getDataPath())
-        p.setGravity(0, 0, -9.8)
+        px.init(mode=p.GUI if self.vis else p.DIRECT)
         self.planeID = p.loadURDF("plane.urdf")
         self.robot.load()
         self.robot.step_simulation = self.step_simulation
@@ -80,7 +78,7 @@ class VTGraspRefine:
         if right_digit_id != self.robot._id:
             right_state = p.getLinkState(self.robot._id, right_digit_id)
             self.frame_visualizer.visualize_frame(right_state[0], right_state[1], 'right_digit')
-
+            
     def step_actions(self, actions, steps):
         """
         执行当前动作并进行仿真
@@ -152,4 +150,4 @@ class VTGraspRefine:
         return obs
 
     def close(self):
-        p.disconnect(self.physicsClient)
+        px.close()

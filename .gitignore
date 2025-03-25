@@ -1,9 +1,10 @@
 # vscode settings
 /.vscode    
+/__pycache__
 /.gitignore
 /envs/grasp_data
 /envs/old_files
 /models
 /docs
-/envs/datasets
 /envs/__pycache__
+/dataset
