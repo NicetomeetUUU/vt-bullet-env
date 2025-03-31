@@ -8,4 +8,4 @@
 /docs
 /envs/__pycache__
 /dataset
-/processed_dataset
+/data/processed_dataset
