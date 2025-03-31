@@ -1,0 +1,55 @@
+2025-03-31 14:17:12,021 - visualize_h5_pointcloud - INFO - 分析H5文件结构: /home/iccd-simulator/code/vt-bullet-env/data/processed_dataset/test/000.h5
+2025-03-31 14:17:12,021 - visualize_h5_pointcloud - INFO - 顶层键: ['cropped_object', 'cropped_surface', 'cropped_surface_context', 'metadata', 'tactile_left', 'tactile_right']
+2025-03-31 14:17:12,021 - visualize_h5_pointcloud - INFO - 样本数量: 19
+2025-03-31 14:17:12,022 - visualize_h5_pointcloud - INFO - 元数据示例: {'obj_id': b'000', 'pose_id': b'005', 'grasp_id': b'000_grasp_015'}
+2025-03-31 14:17:12,022 - visualize_h5_pointcloud - INFO - 点云类型: cropped_object, 形状: (19, 2500, 3)
+2025-03-31 14:17:12,022 - visualize_h5_pointcloud - INFO - 点云类型: cropped_surface, 形状: (19, 25000, 3)
+2025-03-31 14:17:12,022 - visualize_h5_pointcloud - INFO - 点云类型: cropped_surface_context, 形状: (19, 10000, 3)
+2025-03-31 14:17:12,022 - visualize_h5_pointcloud - INFO - 点云类型: tactile_left, 样本数: 20
+2025-03-31 14:17:12,022 - visualize_h5_pointcloud - INFO - 点云类型: tactile_right, 样本数: 20
+2025-03-31 14:17:12,023 - visualize_h5_pointcloud - INFO - 样本 0 元数据: {'obj_id': '000', 'pose_id': '005', 'grasp_id': '000_grasp_015'}
+2025-03-31 14:17:12,167 - visualize_h5_pointcloud - INFO - 添加 cropped_object 点云，点数: 2500
+2025-03-31 14:17:12,190 - visualize_h5_pointcloud - INFO - 添加 cropped_surface 点云，点数: 25000
+2025-03-31 14:17:12,200 - visualize_h5_pointcloud - INFO - 添加 cropped_surface_context 点云，点数: 10000
+2025-03-31 14:17:12,202 - visualize_h5_pointcloud - INFO - 添加 tactile_left 点云，点数: 1235
+2025-03-31 14:17:12,205 - visualize_h5_pointcloud - INFO - 添加 tactile_right 点云，点数: 7414
+2025-03-31 14:17:52,477 - visualize_h5_pointcloud - INFO - 分析H5文件结构: /home/iccd-simulator/code/vt-bullet-env/data/processed_dataset/test/000.h5
+2025-03-31 14:17:52,477 - visualize_h5_pointcloud - INFO - 顶层键: ['cropped_object', 'cropped_surface', 'cropped_surface_context', 'metadata', 'tactile_left', 'tactile_right']
+2025-03-31 14:17:52,477 - visualize_h5_pointcloud - INFO - 样本数量: 19
+2025-03-31 14:17:52,478 - visualize_h5_pointcloud - INFO - 元数据示例: {'obj_id': b'000', 'pose_id': b'005', 'grasp_id': b'000_grasp_015'}
+2025-03-31 14:17:52,478 - visualize_h5_pointcloud - INFO - 点云类型: cropped_object, 形状: (19, 2500, 3)
+2025-03-31 14:17:52,478 - visualize_h5_pointcloud - INFO - 点云类型: cropped_surface, 形状: (19, 25000, 3)
+2025-03-31 14:17:52,478 - visualize_h5_pointcloud - INFO - 点云类型: cropped_surface_context, 形状: (19, 10000, 3)
+2025-03-31 14:17:52,478 - visualize_h5_pointcloud - INFO - 点云类型: tactile_left, 样本数: 20
+2025-03-31 14:17:52,478 - visualize_h5_pointcloud - INFO - 点云类型: tactile_right, 样本数: 20
+2025-03-31 14:17:52,479 - visualize_h5_pointcloud - INFO - 样本 5 元数据: {'obj_id': '000', 'pose_id': '014', 'grasp_id': '000_grasp_013'}
+2025-03-31 14:17:52,670 - visualize_h5_pointcloud - INFO - 添加 cropped_object 点云，点数: 2500
+2025-03-31 14:17:52,693 - visualize_h5_pointcloud - INFO - 添加 cropped_surface 点云，点数: 25000
+2025-03-31 14:17:52,703 - visualize_h5_pointcloud - INFO - 添加 cropped_surface_context 点云，点数: 10000
+2025-03-31 14:17:52,704 - visualize_h5_pointcloud - INFO - 添加 tactile_left 点云，点数: 347
+2025-03-31 14:17:52,705 - visualize_h5_pointcloud - INFO - 添加 tactile_right 点云，点数: 1242
+2025-03-31 14:18:13,440 - visualize_h5_pointcloud - INFO - 分析H5文件结构: /home/iccd-simulator/code/vt-bullet-env/data/processed_dataset/test/000.h5
+2025-03-31 14:18:13,441 - visualize_h5_pointcloud - INFO - 顶层键: ['cropped_object', 'cropped_surface', 'cropped_surface_context', 'metadata', 'tactile_left', 'tactile_right']
+2025-03-31 14:18:13,441 - visualize_h5_pointcloud - INFO - 样本数量: 19
+2025-03-31 14:18:13,441 - visualize_h5_pointcloud - INFO - 元数据示例: {'obj_id': b'000', 'pose_id': b'005', 'grasp_id': b'000_grasp_015'}
+2025-03-31 14:18:13,442 - visualize_h5_pointcloud - INFO - 点云类型: cropped_object, 形状: (19, 2500, 3)
+2025-03-31 14:18:13,442 - visualize_h5_pointcloud - INFO - 点云类型: cropped_surface, 形状: (19, 25000, 3)
+2025-03-31 14:18:13,442 - visualize_h5_pointcloud - INFO - 点云类型: cropped_surface_context, 形状: (19, 10000, 3)
+2025-03-31 14:18:13,442 - visualize_h5_pointcloud - INFO - 点云类型: tactile_left, 样本数: 20
+2025-03-31 14:18:13,442 - visualize_h5_pointcloud - INFO - 点云类型: tactile_right, 样本数: 20
+2025-03-31 14:18:13,442 - visualize_h5_pointcloud - INFO - 样本 0 元数据: {'obj_id': '000', 'pose_id': '005', 'grasp_id': '000_grasp_015'}
+2025-03-31 14:18:13,446 - visualize_h5_pointcloud - INFO - 可视化 cropped_object 点云，点数: 2500
+2025-03-31 14:18:25,629 - visualize_h5_pointcloud - INFO - 可视化 cropped_surface 点云，点数: 25000
+2025-03-31 14:18:33,563 - visualize_h5_pointcloud - INFO - 可视化 cropped_surface_context 点云，点数: 10000
+2025-03-31 14:18:37,040 - visualize_h5_pointcloud - INFO - 可视化 tactile_left 点云，点数: 1235
+2025-03-31 14:18:42,178 - visualize_h5_pointcloud - INFO - 可视化 tactile_right 点云，点数: 7414
+2025-03-31 14:18:56,571 - visualize_h5_pointcloud - INFO - 分析H5文件结构: /home/iccd-simulator/code/vt-bullet-env/data/processed_dataset/test/000.h5
+2025-03-31 14:18:56,571 - visualize_h5_pointcloud - INFO - 顶层键: ['cropped_object', 'cropped_surface', 'cropped_surface_context', 'metadata', 'tactile_left', 'tactile_right']
+2025-03-31 14:18:56,571 - visualize_h5_pointcloud - INFO - 样本数量: 19
+2025-03-31 14:18:56,572 - visualize_h5_pointcloud - INFO - 元数据示例: {'obj_id': b'000', 'pose_id': b'005', 'grasp_id': b'000_grasp_015'}
+2025-03-31 14:18:56,572 - visualize_h5_pointcloud - INFO - 点云类型: cropped_object, 形状: (19, 2500, 3)
+2025-03-31 14:18:56,572 - visualize_h5_pointcloud - INFO - 点云类型: cropped_surface, 形状: (19, 25000, 3)
+2025-03-31 14:18:56,572 - visualize_h5_pointcloud - INFO - 点云类型: cropped_surface_context, 形状: (19, 10000, 3)
+2025-03-31 14:18:56,572 - visualize_h5_pointcloud - INFO - 点云类型: tactile_left, 样本数: 20
+2025-03-31 14:18:56,572 - visualize_h5_pointcloud - INFO - 点云类型: tactile_right, 样本数: 20
+2025-03-31 14:18:57,523 - visualize_h5_pointcloud - INFO - 已保存点云分布图表到 point_distribution_sample_0.png

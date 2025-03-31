@@ -16,7 +16,6 @@ class VTGraspRefine:
         初始化VTGraspRefine环境
         Args:
             robot: 机器人对象
-            models: 可选，模型加载器
             camera: 可选，相机对象
             vis: 是否显示可视化界面
         """
@@ -28,8 +27,8 @@ class VTGraspRefine:
             self.p_bar = tqdm(ncols=0, disable=False)
         
         # 环境定义
-        px.init(mode=p.GUI if self.vis else p.DIRECT)
-        self.planeID = p.loadURDF("plane.urdf")
+        client = px.init(mode=p.GUI if self.vis else p.DIRECT)
+        self.planeID = p.loadURDF("plane.urdf", basePosition=[0, 0, -0.5])
         self.robot.load()
         self.robot.step_simulation = self.step_simulation
         
@@ -78,7 +77,67 @@ class VTGraspRefine:
         if right_digit_id != self.robot._id:
             right_state = p.getLinkState(self.robot._id, right_digit_id)
             self.frame_visualizer.visualize_frame(right_state[0], right_state[1], 'right_digit')
+
+    def calculate_digit_to_ee_transform(self):
+        """计算DIGIT传感器到末端执行器(EE)的坐标系转换关系"""
+        # 获取末端执行器的位置和方向
+        from scipy.spatial.transform import Rotation as R
+        ee_pos, ee_orn = self.robot.get_ee_pos()
+        ee_rot = R.from_quat(ee_orn).as_matrix()
+        
+        # 创建末端执行器的变换矩阵
+        ee_transform = np.eye(4)
+        ee_transform[:3, :3] = ee_rot
+        ee_transform[:3, 3] = ee_pos
+        
+        # 获取DIGIT传感器的链接ID
+        left_digit_id = None
+        right_digit_id = None
+        for joint_name in self.robot.digit_joint_names:
+            joint_info = [j for j in self.robot.joints if j[1] == joint_name][0]
+            if 'left' in joint_name:
+                left_digit_id = joint_info[0]
+            elif 'right' in joint_name:
+                right_digit_id = joint_info[0]
+        
+        # 计算左侧DIGIT传感器的变换矩阵
+        left_transform = None
+        if left_digit_id is not None:
+            left_state = p.getLinkState(self.robot._id, left_digit_id)
+            left_pos, left_orn = left_state[0], left_state[1]
+            left_rot = R.from_quat(left_orn).as_matrix()
             
+            left_transform = np.eye(4)
+            left_transform[:3, :3] = left_rot
+            left_transform[:3, 3] = left_pos
+        
+        # 计算右侧DIGIT传感器的变换矩阵
+        right_transform = None
+        if right_digit_id is not None:
+            right_state = p.getLinkState(self.robot._id, right_digit_id)
+            right_pos, right_orn = right_state[0], right_state[1]
+            right_rot = R.from_quat(right_orn).as_matrix()
+            
+            right_transform = np.eye(4)
+            right_transform[:3, :3] = right_rot
+            right_transform[:3, 3] = right_pos
+        
+        # 计算DIGIT传感器到EE的变换矩阵
+        left_digit_to_ee = None
+        right_digit_to_ee = None
+        
+        if left_transform is not None:
+            # 计算左侧DIGIT传感器到EE的变换矩阵: T_ee_to_world^(-1) * T_digit_to_world
+            ee_transform_inv = np.linalg.inv(ee_transform)
+            left_digit_to_ee = ee_transform_inv @ left_transform
+        
+        if right_transform is not None:
+            # 计算右侧DIGIT传感器到EE的变换矩阵: T_ee_to_world^(-1) * T_digit_to_world
+            ee_transform_inv = np.linalg.inv(ee_transform)
+            right_digit_to_ee = ee_transform_inv @ right_transform
+        
+        return left_digit_to_ee, right_digit_to_ee
+
     def step_actions(self, actions, steps):
         """
         执行当前动作并进行仿真
@@ -98,10 +157,8 @@ class VTGraspRefine:
         for action in actions:
             # 执行动作
             action_wrapper.execute_action(action)
-            if self.vis:
-                # 执行物理仪真和渲染
-                for _ in range(steps):  # 执行1秒的仿真步骤
-                    self.step_simulation()
+            for _ in range(steps):
+                self.step_simulation()
         self._update_coordinate_frames()
 
     def get_ee_pos(self):

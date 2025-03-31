@@ -19,23 +19,6 @@ class ModelLoader:
         """
         self.urdf_file = urdf_file
         self.obj_info = None
-
-    # def _get_urdf_offset(self):
-    #     """从 URDF 文件中读取 origin 偏移
-    #     Args:
-    #         urdf_file: URDF文件路径
-    #     Returns:
-    #         tuple: (x, y, z) 偏移量
-    #     """
-    #     tree = ET.parse(self.urdf_file)
-    #     root = tree.getroot()
-        
-    #     # 获取第一个 link 中的 visual/origin 的 xyz
-    #     origin = root.find('.//visual/origin')
-    #     if origin is not None and 'xyz' in origin.attrib:
-    #         offset_x, offset_y, offset_z = map(float, origin.get('xyz').split())
-    #         return (offset_x, offset_y, offset_z)
-    #     return (0, 0, 0)
     
     def load_object(self, position=(0,0,0), orientation=(0, 0, 0, 1), scale=1.0, name=None):
         """添加一个物体到环境中
@@ -204,7 +187,6 @@ class Camera:
                 nearVal=self.near,
                 farVal=self.far
             )
-            print("相机内参矩阵：", self.view_matrix, self.proj_matrix)
             self.world_position = camera_pos
             self.target_position = camera_target
             self.up_vector = camera_up

@@ -1,0 +1,10 @@
+2025-03-31 14:08:52,090 - dataset_viewer - INFO - 检测到存储模式: scattered
+2025-03-31 14:08:52,090 - dataset_viewer - INFO - 数据集信息:
+2025-03-31 14:08:52,090 - dataset_viewer - INFO -   存储模式: scattered
+2025-03-31 14:08:52,090 - dataset_viewer - INFO -   总样本数: 0
+2025-03-31 14:08:52,090 - dataset_viewer - INFO -   训练集: 0 样本
+2025-03-31 14:08:52,090 - dataset_viewer - INFO -   验证集: 0 样本
+2025-03-31 14:08:52,090 - dataset_viewer - INFO -   测试集: 0 样本
+2025-03-31 14:08:52,090 - dataset_viewer - INFO -   点云类型: 
+2025-03-31 14:08:52,090 - dataset_viewer - INFO - 点云统计信息:
+2025-03-31 14:08:52,090 - dataset_viewer - ERROR - 无法获取随机样本

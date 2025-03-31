@@ -235,7 +235,7 @@ class UR5Robotiq140(UR5Robotiq85):
         # 调整休息姿势，使其更适合IK求解
         self.arm_rest_poses = [-1.5690622952052096, -1.5446774605904932, 1.343946009733127, -1.3708613585093699,
                                -1.5707970583733368, 0.0009377758247187636]
-        self._id = p.loadURDF('./urdf/ur5_robotiq_140.urdf', self.base_pos, self.base_ori,
+        self._id = p.loadURDF('./urdf/ur5_robotiq_140_remove_collision.urdf', self.base_pos, self.base_ori,
                              useFixedBase=True, flags=p.URDF_ENABLE_CACHED_GRAPHICS_SHAPES)
         # Robotiq 140 有更大的开合范围
         self.gripper_range = [0, 0.140]  # 0-140mm
@@ -257,17 +257,6 @@ class UR5Robotiq140(UR5Robotiq85):
         for i, joint_id in enumerate(self.arm_controllable_joints):
             p.setJointMotorControl2(self._id, joint_id, p.POSITION_CONTROL, joints_poses[i],
                                     force=self.joints[joint_id].maxForce, maxVelocity=self.joints[joint_id].maxVelocity)
-    
-    # def move_pose(self, pos, orn):
-    #     arm_rest_poses = [-3.14, -1.5446774605904932, 1.343946009733127, -1.3708613585093699,
-    #                     -1.5707970583733368, 0.0009377758247187636]
-    #     joint_poses = p.calculateInverseKinematics(self._id, self.eef_id, pos, orn,
-    #                                                 self.arm_lower_limits, self.arm_upper_limits, self.arm_joint_ranges, arm_rest_poses,
-    #                                                 maxNumIterations=100,
-    #                                                 residualThreshold=2e-3)
-    #     for i, joint_id in enumerate(self.arm_controllable_joints):
-    #         p.setJointMotorControl2(self._id, joint_id, p.POSITION_CONTROL, joint_poses[i],
-    #                                 force=self.joints[joint_id].maxForce, maxVelocity=self.joints[joint_id].maxVelocity)
 
     def get_joint_poses(self):
         return [p.getJointState(self._id, joint_id)[0] for joint_id in self.arm_controllable_joints]
@@ -277,14 +266,24 @@ class UR5Robotiq140(UR5Robotiq85):
         joint_poses = p.calculateInverseKinematics(self._id, self.eef_id, pos, orn,
                                                    self.arm_lower_limits, self.arm_upper_limits, self.arm_joint_ranges, self.arm_rest_poses,
                                                    maxNumIterations=200, residualThreshold=1e-4)
-        
+        print("目标位姿:", pos, orn)
         # 只取前arm_num_dofs个关节角度，因为IK求解可能返回更多的值
         joint_poses = joint_poses[:self.arm_num_dofs]
         for i, joint_id in enumerate(self.arm_controllable_joints):
             p.setJointMotorControl2(self._id, joint_id, p.POSITION_CONTROL, joint_poses[i], 
                                     force=self.joints[joint_id].maxForce, maxVelocity=self.joints[joint_id].maxVelocity)
+        print("实际位姿:", self.get_ee_pos())
 
-    def move_hand_to_pose(self, pos, orn):
+    def calculate_forward_movement(self, open_length):
+        """计算夹爪从完全开启到该开合状态时的前向移动距离
+        """
+        # 计算初始角度和最终角度
+        half_open_length = open_length / 2
+        forward_distance = np.sqrt(0.0976**2 - half_open_length**2) - 0.07
+        print("Forward distance:", forward_distance)
+        return forward_distance
+
+    def move_hand_to_pose(self, pos, orn, gripper_width):
         """通过设定hand位姿来控制机器人末端执行器的位姿
         
         Args:
@@ -300,7 +299,8 @@ class UR5Robotiq140(UR5Robotiq85):
         # 计算x轴方向
         x_axis = rot_matrix[:, 0]  # 旋转矩阵的第一列是x轴方向
         
-        ee_pos = np.array(pos) - 0.175 * x_axis
+        forward_distance = self.calculate_forward_movement(gripper_width)
+        ee_pos = np.array(pos) - (forward_distance + 0.179) * x_axis
         
         # 末端执行器的朝向与hand相同
         ee_orn = orn

@@ -9,7 +9,7 @@ import cv2
 import open3d as o3d
 from tqdm import tqdm
 import json
-from scipy.spatial.transform import Rotation
+from scipy.spatial.transform import Rotation as R
 import pdb
 
 def show_collision_mode():
@@ -98,50 +98,133 @@ def save_grasp_poses(collector, obj_id, obj_dir):
     grasp_poses = get_grasp_poses_from_pcd(camera_pcd)
     return grasp_poses, cropped_pcd
 
+
+
+euler_orientations = [
+    [0.0000, 0.0000, 0.0000],
+    [0.2618, 0.8345, 0.4854],
+    [0.5236, 1.1071, 0.9709],
+    [0.7854, 0.9599, 1.4563],
+    [1.0472, 0.5890, 1.9417],
+    [1.3090, 0.1592, 2.4271],
+    [1.5708, -0.2707, 2.9126],
+    [1.8326, -0.6405, 3.3980],
+    [2.0944, -0.8877, 3.8834],
+    [2.3562, -0.9599, 4.3689],
+    [2.6180, -0.8345, 4.8543],
+    [2.8798, -0.5345, 5.3397],
+    [3.1416, -0.0000, 5.8252],
+    [3.4034, 0.5345, 0.5236],
+    [3.6652, 0.8345, 1.0090],
+    [3.9270, 0.9599, 1.4944],
+    [4.1888, 0.8877, 1.9799],
+    [4.4506, 0.6405, 2.4653],
+    [4.7124, 0.2707, 2.9507],
+    [4.9742, -0.1592, 3.4362],
+    [5.2360, -0.5890, 3.9216],
+    [5.4978, -0.9599, 4.4070],
+    [5.7596, -1.1071, 4.8925],
+    [6.0214, -0.8345, 5.3779]
+]
+
+def save_each_pose_each_object_camera_pcd():
+    save_dir = '../dataset'
+    os.makedirs(save_dir, exist_ok=True)
+    # 遍历000-088的所有物体
+    collector = TactileDataCollector(save_dir=save_dir, visualize_gui=False)
+    # collector.move_to_joint_poses([0, -1.5446774605904932, 1.343946009733127, -1.3708613585093699,
+    #                             -1.5707970583733368, 0.0009377758247187636])
+    for obj_idx in tqdm(range(0, 88)):
+        obj_dir = f"{obj_idx:03d}"  # 将数字转换为3位数的字符串
+        first_save_dir = os.path.join(save_dir, obj_dir)
+        os.makedirs(first_save_dir, exist_ok=True)
+        for i, euler in enumerate(euler_orientations):
+            cur_save_dir = os.path.join(first_save_dir, f"pose_{i:03d}")
+            collector.save_dir = cur_save_dir
+            os.makedirs(cur_save_dir, exist_ok=True)
+            urdf_path = f"/home/iccd-simulator/code/vt-bullet-env/models/{obj_dir}/object.urdf"
+            base_quat = R.from_euler('xyz', euler).as_quat()
+            object_cfg = {
+                "urdf_path": urdf_path,
+                "base_position": (0, -0.5, 0.1),
+                "base_orientation": base_quat,
+                "global_scaling": 1.0,
+                "use_fixed_base": True,
+            }
+            obj_id = collector.load_object(object_cfg)
+            p.changeDynamics(obj_id, -1,
+                    mass=0.0,  # 设置质量为0使其固定
+                    )
+            pcd = collector.env.camera.get_point_cloud_world()
+            cropped_pcd = collector.crop_pointcloud_by_aabb(pcd, obj_id, margin=0.01)
+            camera_pcd = collector.transform_pointcloud(cropped_pcd, source_frame='world', target_frame='camera')
+            obj_pcd = collector.transform_to_object_frame(cropped_pcd, obj_id)
+            rgb, _, _ = collector.get_camera_image()
+            collector.save_pointcloud(pcd=camera_pcd, file_name=f"{obj_dir}_camera")
+            collector.save_pointcloud(pcd=obj_pcd, file_name=f"{obj_dir}_object")
+            rgb_dir = os.path.join(cur_save_dir, f"{obj_dir}_camera")
+            # cv2.imwrite(f"{rgb_dir}_rgb.png", rgb)
+            collector.remove_object(obj_id)
+            
+def visualize_saved_pcds():
+    save_dir = '../dataset'
+    os.makedirs(save_dir, exist_ok=True)
+    for obj_idx in tqdm(range(68, 69)):
+        obj_dir = f"{obj_idx:03d}"  # 将数字转换为3位数的字符串
+        for i, euler in enumerate(euler_orientations):
+            cur_save_dir = os.path.join(save_dir, obj_dir, f"pose_{i:03d}")
+            pcd_file = os.path.join(cur_save_dir, f"{obj_dir}_camera.pcd")
+            visualize_pointcloud(pcd_file)
+            
+
 def dataset_collect():
     # 创建数据采集器和保存目录
     save_dir = '../dataset'
     os.makedirs(save_dir, exist_ok=True)
     # 遍历000-088的所有物体
+    collector = TactileDataCollector(save_dir=save_dir, visualize_gui=True)
     for obj_idx in tqdm(range(3, 4)):
-        collector = TactileDataCollector(save_dir=save_dir, visualize_gui=True)
-        obj_dir = f"{obj_idx:03d}"  # 将数字转换为3位数的字符串
-        urdf_path = f"/home/iccd-simulator/code/vt-bullet-env/models/{obj_dir}/object.urdf"
-        collector.move_to_joint_poses([0, -1.5446774605904932, 1.343946009733127, -1.3708613585093699,
-                               -1.5707970583733368, 0.0009377758247187636])
-        collector.save_dir = os.path.join(save_dir, obj_dir)
-        if not os.path.exists(collector.save_dir):
-            os.makedirs(collector.save_dir, exist_ok=True)
-        #obj_id = collector.load_object(urdf_path, position=(0, -0.5, 0.1))
-        object_cfg = {
-            "urdf_path": urdf_path,
-            "base_position": (0, -0.5, 0.1),
-            "global_scaling": 1.0,
-            "use_fixed_base": True,
-        }
-        obj_id = collector.load_object(object_cfg)
-        p.changeDynamics(obj_id, -1,
-                mass=0.0,  # 设置质量为0使其固定
-                )
-        pcd = collector.env.camera.get_point_cloud_world()
-        cropped_pcd = collector.crop_pointcloud_by_aabb(pcd, obj_id, margin=0.01)
-        # grasp_poses = save_grasp_poses(collector, obj_id, obj_dir)
-        grasp_poses = json.load(open("/home/iccd-simulator/code/vt-bullet-env/dataset/tmp_files/grasp_poses.json"))
-        # show_collision_mode()
-        tactile_pointcloud_list, tactile_poses = collector.execute_grasps(grasp_poses)
-        show_three_pointclouds(obj_id, collector, cropped_pcd, tactile_pointcloud_list, tactile_poses)
+        for i, euler in enumerate(euler_orientations):
+            obj_dir = f"{obj_idx:03d}"  # 将数字转换为3位数的字符串
+            urdf_path = f"/home/iccd-simulator/code/vt-bullet-env/models/{obj_dir}/object.urdf"
+            collector.move_to_joint_poses([0, -1.5446774605904932, 1.343946009733127, -1.3708613585093699,
+                                       -1.5707970583733368, 0.0009377758247187636])
+            collector.save_dir = os.path.join(save_dir, obj_dir)
+            if not os.path.exists(collector.save_dir):
+                os.makedirs(collector.save_dir, exist_ok=True)
 
-        input("Press Enter to continue...")
-        del collector
+            base_quat = R.from_euler('xyz', euler).as_quat()
+            object_cfg = {
+                "urdf_path": urdf_path,
+                "base_position": (0, -0.5, 0.1),
+                "base_orientation": base_quat,
+                "global_scaling": 1.0,
+                "use_fixed_base": True,
+            }
+            obj_id = collector.load_object(object_cfg)
+            obj_pose = p.getBasePositionAndOrientation(obj_id)
+            print(f"Object pose: {obj_pose}")
+            p.changeDynamics(obj_id, -1,
+                    mass=0.0,  # 设置质量为0使其固定
+                    )
+            pcd = collector.env.camera.get_point_cloud_world()
+            cropped_pcd = collector.crop_pointcloud_by_aabb(pcd, obj_id, margin=0.01)
+            camera_pcd = collector.transform_pointcloud(cropped_pcd, source_frame='world', target_frame='camera')
+        # # grasp_poses = save_grasp_poses(collector, obj_id, obj_dir)
+        # grasp_poses = json.load(open("/home/iccd-simulator/code/vt-bullet-env/dataset/tmp_files/grasp_poses.json"))
+        # # show_collision_mode()
+        # tactile_pointcloud_list, tactile_poses = collector.execute_grasps(grasp_poses)
+        # show_three_pointclouds(obj_id, collector, cropped_pcd, tactile_pointcloud_list, tactile_poses)
+        collector.remove_object(obj_id)
     print("所有物体数据集采集完成！")
 
-def show_three_pointclouds(obj_id, collector, object_pcd, tactile_pointcloud_list, camera_poses):
+def show_three_pointclouds(obj_id, collector, object_pcd, tactile_pointcloud_list, tactile_poses):
     """将物体点云和触觉传感器点云拼接到一起并可视化
     
     Args:
         object_pcd: 物体点云（Open3D点云对象）
         tactile_pointcloud_list: 触觉传感器点云列表（包含两个点云）
-        camera_poses: 相机位姿列表
+        tactile_poses: 触觉传感器位姿列表
     """
     try:
         
@@ -194,17 +277,15 @@ def show_three_pointclouds(obj_id, collector, object_pcd, tactile_pointcloud_lis
         
         # 添加坐标系
         coordinate_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.05, origin=[0, 0, 0])
-        coordinate_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.05, origin=[0, 0, 0])
         vis.add_geometry(coordinate_frame)
 
         # 添加相机坐标系
-        for i, camera_pose in enumerate(camera_poses):
+        for i, tactile_pose in enumerate(tactile_poses):
             # 创建坐标系（设置更小的大小以避免挡住点云）
-            camera_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.01)
+            tactile_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.01)
             # 应用相机位姿变换，显示完整的相机位姿（位置和方向）
-            camera_frame.transform(camera_pose)
-            vis.add_geometry(camera_frame)
-            print(f"相机{i+1}位姿:\n{camera_pose}")
+            tactile_frame.transform(tactile_pose)
+            vis.add_geometry(tactile_frame)
         
         # 设置渲染选项
         opt = vis.get_render_option()
@@ -227,4 +308,5 @@ def show_three_pointclouds(obj_id, collector, object_pcd, tactile_pointcloud_lis
         print(f"点云集成可视化失败: {e}")
 
 if __name__ == '__main__':
-    dataset_collect()              
+    # save_each_pose_each_object_camera_pcd()              
+    visualize_saved_pcds()         

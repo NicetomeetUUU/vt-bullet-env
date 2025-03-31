@@ -1,0 +1,20 @@
+2025-03-31 14:10:31,110 - visualize_point_cloud - INFO - 加载数据集: /home/iccd-simulator/code/vt-bullet-env/data/processed_dataset/test/000.h5
+2025-03-31 14:10:31,111 - visualize_point_cloud - INFO - 数据集包含以下键: ['cropped_object', 'cropped_surface', 'cropped_surface_context', 'metadata', 'tactile_left', 'tactile_right']
+2025-03-31 14:10:31,111 - visualize_point_cloud - INFO - 数据集信息:
+2025-03-31 14:10:31,111 - visualize_point_cloud - INFO -   文件路径: /home/iccd-simulator/code/vt-bullet-env/data/processed_dataset/test/000.h5
+2025-03-31 14:10:31,111 - visualize_point_cloud - INFO -   样本数量: 19
+2025-03-31 14:10:31,111 - visualize_point_cloud - INFO -   点云类型: 
+2025-03-31 14:10:31,111 - visualize_point_cloud - INFO - 点云统计信息:
+2025-03-31 14:11:53,106 - visualize_point_cloud - INFO - 加载数据集: /home/iccd-simulator/code/vt-bullet-env/data/processed_dataset/test/000.h5
+2025-03-31 14:11:53,107 - visualize_point_cloud - INFO - 数据集包含以下键: ['cropped_object', 'cropped_surface', 'cropped_surface_context', 'metadata', 'tactile_left', 'tactile_right']
+2025-03-31 14:11:53,107 - visualize_point_cloud - INFO -   cropped_object: 组
+2025-03-31 14:11:53,107 - visualize_point_cloud - INFO -   cropped_surface: 组
+2025-03-31 14:11:53,107 - visualize_point_cloud - INFO -   cropped_surface_context: 组
+2025-03-31 14:11:53,108 - visualize_point_cloud - INFO -   metadata: 形状 (19,), 类型 [('obj_id', 'S10'), ('pose_id', 'S10'), ('grasp_id', 'S20')]
+2025-03-31 14:11:53,108 - visualize_point_cloud - INFO -   tactile_left: 组
+2025-03-31 14:11:53,108 - visualize_point_cloud - INFO -   tactile_right: 组
+2025-03-31 14:11:53,108 - visualize_point_cloud - INFO - 数据集信息:
+2025-03-31 14:11:53,108 - visualize_point_cloud - INFO -   文件路径: /home/iccd-simulator/code/vt-bullet-env/data/processed_dataset/test/000.h5
+2025-03-31 14:11:53,108 - visualize_point_cloud - INFO -   样本数量: 19
+2025-03-31 14:11:53,108 - visualize_point_cloud - INFO -   点云类型: 
+2025-03-31 14:11:53,108 - visualize_point_cloud - INFO - 点云统计信息:

@@ -5,11 +5,6 @@ import pybullet as p
 import trimesh
 from pathlib import Path
 
-import os
-import glob
-from pathlib import Path
-import numpy as np
-import trimesh
 import json
 
 class URDFGenerator:
@@ -608,19 +603,70 @@ def generate_vhacd_for_model(model_id):
     print(f"URDF文件已更新: {urdf_file}")
     return True
 
+def get_max_dimensions_for_all_models():
+    """
+    读取000-087路径下每个URDF模型的长宽高中最大的值
+    
+    Returns:
+        dict: 包含每个模型ID和其最大尺寸的字典
+    """
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    base_models_dir = os.path.join(current_dir, "../models")
+    
+    # 存储结果的字典
+    max_dimensions = {}
+    
+    # 遍历000-087的所有模型
+    for obj_idx in range(0, 88):
+        model_id = f"{obj_idx:03d}"
+        model_dir = os.path.join(base_models_dir, model_id)
+        
+        # 检查模型目录是否存在
+        if not os.path.exists(model_dir):
+            print(f"警告：模型目录不存在 {model_dir}")
+            continue
+            
+        # 获取obj文件
+        obj_files = glob.glob(os.path.join(model_dir, "*.obj"))
+        
+        if not obj_files:
+            print(f"警告：模型 {model_id} 目录下缺少obj文件")
+            continue
+        
+        # 加载模型
+        try:
+            mesh = trimesh.load(obj_files[0])
+            
+            # 获取边界框和尺寸
+            bounding_box = mesh.bounds
+            dimensions = bounding_box[1] - bounding_box[0]
+            
+            # 获取最大尺寸
+            max_dimension = np.max(dimensions)
+            
+            # 存储结果
+            max_dimensions[model_id] = max_dimension
+            
+            print(f"模型 {model_id} 的最大尺寸: {max_dimension:.4f} 米")
+        except Exception as e:
+            print(f"处理模型 {model_id} 时出错: {str(e)}")
+    
+    return max_dimensions
+
 if __name__ == "__main__":
     # import sys
-    from tqdm import tqdm  # 正确的导入方式
+    get_max_dimensions_for_all_models()
+    # from tqdm import tqdm  # 正确的导入方式
     
     # 选项一：处理所有模型
-    print("开始为所有模型生成VHACD碰撞体...")
-    for obj_idx in tqdm(range(0, 88)):
-        model_id = f"{obj_idx:03d}"
-        try:
-            generate_vhacd_for_model(model_id)
-        except Exception as e:
-            print(f"处理模型 {model_id} 时出错: {e}")
-            continue
+    # print("开始为所有模型生成VHACD碰撞体...")
+    # for obj_idx in tqdm(range(0, 88)):
+    #     model_id = f"{obj_idx:03d}"
+    #     try:
+    #         generate_vhacd_for_model(model_id)
+    #     except Exception as e:
+    #         print(f"处理模型 {model_id} 时出错: {e}")
+    #         continue
     
     # 注释掉的命令行参数处理代码
     # if len(sys.argv) > 1 and sys.argv[1] == "vhacd":
